@@ -11,6 +11,24 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.5.1] - 2026-11-25
+
+### Changed
+- Reverse path now uses per-hop tag rewriting instead of one global circuit id.
+  Each relay sees only its local in/out tags:
+  `t0 -> t1 -> t2`, and reply rewrites `t2 -> t1 -> t0`.
+- Relay state is O(active circuits): `in[tag] -> {prev, outTag}` and
+  `out[outTag] -> inTag`.
+
+### Measured
+- 4000/4000 replies, 0% loss, RTT min 23 us / avg 121 us / max 798 us.
+- Forward audit: 0.0000% mismatch at every hop.
+
+### Known limitations
+- No tag expiry / idle cleanup yet.
+- Reply is not onion-encrypted.
+- One client per circuit.
+
 ## [0.5.0] - 2026-11-25
 
 ### Added

@@ -94,15 +94,18 @@
 
 已实现（本机 demo）：
 
-- forward 帧携带 8 B circuit ID；每个 relay 维护 `circuit -> 上一跳`。
-- exit 把 payload 原样作为 reply 帧，按 circuit 表逐跳返回；reply 帧不更新表，避免回环。
-- 客户端按 circuit ID 过滤 reply，计算 RTT。
+- forward 帧携带 8 B tag；每个 relay 把入 tag 映射到出 tag，转发时重写：
+  `entry: t0 -> t1`、`middle: t1 -> t2`、`exit: t2 -> prev`。
+- reply 帧用出 tag 查回入 tag，逐跳重写；每个 relay 只看到相邻 tag。
+- 状态：每条活跃电路两条表项（`in[tag] -> {prev, outTag}`、`out[outTag] -> inTag`），
+  复杂度 O(active circuits)。
+- 客户端按自己的 t0 过滤 reply，计算 RTT。
 
 限制：
 
-- circuit ID 对所有 relay 可见，是 linkability 泄漏；真实系统应使用每跳假名或反向洋葱。
+- 还没有 tag 过期/清理；长期运行需要 idle timeout。
 - reply 未做逐层加密；本机 demo 可接受，公网需要补。
-- 每个 circuit 只支持单客户端；多客户端需要独立 circuit。
+- 每个 circuit 只支持单客户端；多客户端需要独立 tag。
 
 ---
 

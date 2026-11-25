@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -20,21 +21,73 @@ import (
 	"dvpn-sim/internal/receipt"
 )
 
-type peerTable struct {
-	mu sync.Mutex
-	m  map[uint64]*net.UDPAddr
+type fwdState struct {
+	prev   *net.UDPAddr
+	outTag uint64
 }
 
-func (p *peerTable) set(cid uint64, addr *net.UDPAddr) {
-	p.mu.Lock()
-	p.m[cid] = addr
-	p.mu.Unlock()
+type relayState struct {
+	mu  sync.Mutex
+	in  map[uint64]*fwdState
+	out map[uint64]uint64 // outTag -> inTag
 }
 
-func (p *peerTable) get(cid uint64) *net.UDPAddr {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.m[cid]
+func newRelayState() *relayState {
+	return &relayState{
+		in:  map[uint64]*fwdState{},
+		out: map[uint64]uint64{},
+	}
+}
+
+func (s *relayState) forward(inTag uint64, prev *net.UDPAddr, isExit bool) *fwdState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if st := s.in[inTag]; st != nil {
+		st.prev = prev
+		return st
+	}
+	st := &fwdState{prev: prev}
+	if !isExit {
+		for {
+			t := randTag()
+			if _, exists := s.out[t]; !exists {
+				st.outTag = t
+				s.out[t] = inTag
+				break
+			}
+		}
+	}
+	s.in[inTag] = st
+	return st
+}
+
+func (s *relayState) replyPeer(tag uint64, isExit bool) (*net.UDPAddr, uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if isExit {
+		st := s.in[tag]
+		if st == nil {
+			return nil, 0, false
+		}
+		return st.prev, tag, true
+	}
+	inTag, ok := s.out[tag]
+	if !ok {
+		return nil, 0, false
+	}
+	st := s.in[inTag]
+	if st == nil {
+		return nil, 0, false
+	}
+	return st.prev, inTag, true
+}
+
+func randTag() uint64 {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err)
+	}
+	return binary.BigEndian.Uint64(b[:])
 }
 
 func main() {
@@ -86,6 +139,7 @@ func main() {
 			log.Fatal(err)
 		}
 	}
+	isExit := dest != nil
 
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -93,7 +147,7 @@ func main() {
 	}
 	start := time.Now()
 
-	peers := &peerTable{m: map[uint64]*net.UDPAddr{}}
+	state := newRelayState()
 	var packets, bytesIn, bytesOut atomic.Uint64
 	var replyPackets, replyIn, replyOut atomic.Uint64
 
@@ -122,20 +176,21 @@ func main() {
 		if err != nil {
 			return
 		}
-		inner, typ, cid, err := frame.Decode(buf[:n])
+		inner, typ, tag, err := frame.Decode(buf[:n])
 		if err != nil {
 			log.Printf("bad frame: %v", err)
 			continue
 		}
+
 		if typ == frame.TypeReply {
 			replyPackets.Add(1)
 			replyIn.Add(uint64(n))
-			peer := peers.get(cid)
-			if peer == nil {
-				log.Printf("reply for unknown circuit %d", cid)
+			peer, outTag, ok := state.replyPeer(tag, isExit)
+			if !ok {
+				log.Printf("reply for unknown tag %d", tag)
 				continue
 			}
-			out, err := frame.Encode(inner, *frameSize, frame.TypeReply, cid)
+			out, err := frame.Encode(inner, *frameSize, frame.TypeReply, outTag)
 			if err != nil {
 				log.Printf("encode reply: %v", err)
 				continue
@@ -150,8 +205,7 @@ func main() {
 
 		packets.Add(1)
 		bytesIn.Add(uint64(n))
-		// Only forward frames update the reverse path table.
-		peers.set(cid, remote)
+		st := state.forward(tag, remote, isExit)
 
 		nextHop, inner2, err := onion.Peel(inner, key)
 		if err != nil {
@@ -169,14 +223,12 @@ func main() {
 			} else {
 				bytesOut.Add(uint64(len(inner2)))
 			}
-			if peer := peers.get(cid); peer != nil {
-				out, err := frame.Encode(inner2, *frameSize, frame.TypeReply, cid)
-				if err == nil {
-					if _, err := conn.WriteToUDP(out, peer); err != nil {
-						log.Printf("write reply: %v", err)
-					} else {
-						replyOut.Add(uint64(len(out)))
-					}
+			out, err := frame.Encode(inner2, *frameSize, frame.TypeReply, tag)
+			if err == nil {
+				if _, err := conn.WriteToUDP(out, st.prev); err != nil {
+					log.Printf("write reply: %v", err)
+				} else {
+					replyOut.Add(uint64(len(out)))
 				}
 			}
 			continue
@@ -190,7 +242,7 @@ func main() {
 			log.Printf("next hop mismatch: got %s want %s", nextHop, *nextID)
 			continue
 		}
-		out, err := frame.Encode(inner2, *frameSize, frame.TypeForward, cid)
+		out, err := frame.Encode(inner2, *frameSize, frame.TypeForward, st.outTag)
 		if err != nil {
 			log.Printf("encode: %v", err)
 			continue

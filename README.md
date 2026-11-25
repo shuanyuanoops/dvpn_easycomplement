@@ -27,7 +27,7 @@ go test ./...
 
 - 3-hop 电路：client → entry → middle → exit → destination。
 - **真洋葱信元**：AES-256-GCM 逐层加密，固定 1024 B 帧；3 跳有效载荷 878 B。
-- **反向路径**：circuit ID + peer table；客户端可测 RTT。
+- **反向路径**：per-hop tag 重写（`t0 -> t1 -> t2`）+ 上一跳表；客户端可测 RTT。
   - 每跳只解一层，只知道下一跳；出口才知道 `dest`。
   - 交换节点看不到最终目标；只有出口看到。
 - 每个包按链路延迟 + 串行化时间推进；链路有排队（`nextFree`）。
