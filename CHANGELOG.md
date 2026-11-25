@@ -11,6 +11,16 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.11.0] - 2026-11-25
+
+### Added
+- `internal/chain`: simulated ledger with Ed25519-signed txs for node
+  registration, stake/unstake, deposit, epoch settlement, and dispute/slash.
+- Blocks with prev-hash chaining; account balances, node stake/earned, treasury.
+- `cmd/chain` demo: register 3 nodes, settle epoch 1, dispute exit, print state.
+- `docs/ENGINEERING.md` §7.6: on-chain vs off-chain table.
+- Tests: register/stake/settle, dispute slash, bad signature, block chain.
+
 ## [0.10.0] - 2026-11-25
 
 ### Added

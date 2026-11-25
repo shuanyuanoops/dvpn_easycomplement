@@ -15,6 +15,7 @@
 | v0.8 | 可配置 hop 数/信元大小 | `TestHops234` |
 | v0.9 | E+X 关联分析、cover traffic | `internal/privacy` |
 | v0.10 | 随机 hop 范围、电路分散度、批量实验表 | `TestRandomHopsAndDiversity` |
+| v0.11 | 模拟链：注册/质押/结算/罚没、Ed25519 交易、区块 | `internal/chain` |
 
 全量：`go test ./...` 通过。
 
@@ -30,7 +31,8 @@
 | 3 | 1500 | 0 | 80 ms | 7.93 | 18.25 | 0.06 |
 | 3 | 1024 | 100 | 80 ms | 5.17 | 25.52 | 0.04 |
 
-完整表：`go run ./cmd/bench` → `results/bench.csv`。
+完整表：`go run ./cmd/bench
+go run ./cmd/chain` → `results/bench.csv`。
 
 ## 已知限制
 
@@ -48,6 +50,7 @@ go test ./...
 go run ./cmd/sim -scenario all
 go run ./cmd/sim -scenario honest -hops-min 3 -hops-max 5 -cover 100
 go run ./cmd/bench
+go run ./cmd/chain
 bash scripts/run_local.sh
 ```
 
