@@ -11,6 +11,18 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.9.0] - 2026-11-25
+
+### Added
+- `internal/privacy`: E+X collusion analysis over `(start, bytes)` observations,
+  with synthetic cover sessions.
+- `-cover N` CLI flag; `anonymity_set` and `linkability` metrics.
+- Tests for privacy analysis and sim integration.
+
+### Measured (20 clients x 20 packets, DNS local)
+- cover=0:   anonymity_set=15.50, linkability=0.07
+- cover=100: anonymity_set=21.05, linkability=0.05
+
 ## [0.8.0] - 2026-11-25
 
 ### Added

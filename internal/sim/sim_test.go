@@ -99,3 +99,20 @@ func TestHops234(t *testing.T) {
 		}
 	}
 }
+
+func TestPrivacyCover(t *testing.T) {
+	base := baseConfig()
+	base.Clients = 1
+	base.PacketsPerSession = 10
+	base.CoverSessions = 0
+	r0 := New(base).Run()
+	if r0.AnonymitySet != 1 {
+		t.Fatalf("no cover: set=%f want 1", r0.AnonymitySet)
+	}
+	withCover := base
+	withCover.CoverSessions = 100
+	r1 := New(withCover).Run()
+	if r1.AnonymitySet <= 1 {
+		t.Fatalf("cover: set=%f want >1", r1.AnonymitySet)
+	}
+}

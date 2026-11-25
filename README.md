@@ -21,6 +21,7 @@ go run ./cmd/sim -scenario all
 go run ./cmd/sim -scenario overreport -clients 120 -packets 50
 go run ./cmd/sim -scenario honest -dns local
 go run ./cmd/sim -scenario honest -hops 2 -cell 512
+go run ./cmd/sim -scenario honest -cover 100
 go test ./...
 ```
 

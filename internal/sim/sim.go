@@ -11,6 +11,7 @@ import (
 	dvpnlink "dvpn-sim/internal/link"
 	"dvpn-sim/internal/model"
 	"dvpn-sim/internal/onion"
+	"dvpn-sim/internal/privacy"
 )
 
 // Config controls one simulation run.
@@ -21,6 +22,7 @@ type Config struct {
 	PacketsPerSession int
 	Hops              int
 	CellSize          int
+	CoverSessions     int
 	DNSSize           int
 	DNSMode           string // "tunnel" (through the circuit) or "local" (leaks)
 
@@ -56,6 +58,9 @@ type Results struct {
 	DNSPackets    int
 	LocalDNSLeaks int
 	Hops          int
+
+	AnonymitySet float64
+	Linkability  float64
 
 	LinkReceipts    int
 	LinkFailed      int
@@ -121,6 +126,8 @@ type sessionState struct {
 	packets     int
 	delivered   int
 	latencyNs   int64
+	startAt     int64
+	endAt       int64
 }
 
 type Sim struct {
@@ -277,8 +284,8 @@ func (s *Sim) Run() Results {
 	for c := 0; c < s.cfg.Clients; c++ {
 		client := fmt.Sprintf("client-%d", c)
 		circ := s.buildCircuit(client)
-		s.sessions[client] = &sessionState{circuit: circ}
 		base := int64(c) * 1_000_000
+		s.sessions[client] = &sessionState{circuit: circ, startAt: base}
 
 		if s.cfg.DNSMode == "local" {
 			s.res.LocalDNSLeaks++
@@ -327,6 +334,7 @@ func (s *Sim) Run() Results {
 	s.res.DurationNs = s.now
 	s.buildReceipts()
 	s.audit()
+	s.privacyReport()
 	return s.res
 }
 
@@ -386,6 +394,9 @@ func (s *Sim) handleDeliver(pkt model.Packet) {
 	ss := s.sessions[pkt.Session]
 	ss.delivered++
 	ss.latencyNs += s.now - pkt.SentAt
+	if s.now > ss.endAt {
+		ss.endAt = s.now
+	}
 }
 
 func (s *Sim) linkDelay(from, to model.NodeID, size int) int64 {
@@ -479,6 +490,44 @@ func (s *Sim) buildReceipts() {
 			s.linkReceipts = append(s.linkReceipts, dvpnlink.Sign(session, string(from), string(to), 1, c.packets, c.bytes, s.keys[from], s.keys[to]))
 		}
 	}
+}
+
+func (s *Sim) privacyReport() {
+	var real []privacy.Obs
+	var totalBytes int64
+	for session, ss := range s.sessions {
+		if ss.endAt == 0 {
+			continue
+		}
+		real = append(real, privacy.Obs{
+			Session: session,
+			Start:   ss.startAt,
+			End:     ss.endAt,
+			Bytes:   ss.clientBytes,
+			Real:    true,
+		})
+		totalBytes += ss.clientBytes
+	}
+	if len(real) == 0 {
+		return
+	}
+	avg := totalBytes / int64(len(real))
+	var cover []privacy.Obs
+	for i := 0; i < s.cfg.CoverSessions; i++ {
+		start := int64(0)
+		if s.now > 0 {
+			start = s.rng.Int63n(s.now)
+		}
+		factor := 0.8 + 0.4*s.rng.Float64()
+		cover = append(cover, privacy.Obs{
+			Session: fmt.Sprintf("cover-%d", i),
+			Start:   start,
+			Bytes:   int64(float64(avg) * factor),
+		})
+	}
+	rep := privacy.Analyze(real, cover, 10_000_000, avg/10)
+	s.res.AnonymitySet = rep.AvgSetSize
+	s.res.Linkability = rep.Linkability
 }
 
 func (s *Sim) isCheatSession(session string) bool {
