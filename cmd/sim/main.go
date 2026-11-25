@@ -41,6 +41,8 @@ func main() {
 		fmt.Printf("avg_latency_ms=%.2f throughput_mbps=%.2f\n", r.AvgLatencyMs(), r.ThroughputMBps())
 		fmt.Printf("payload_mb=%.2f wire_mb=%.2f\n", float64(r.TotalBytes)/1e6, float64(r.WireBytes)/1e6)
 		fmt.Printf("dns_packets=%d local_dns_leaks=%d\n", r.DNSPackets, r.LocalDNSLeaks)
+		fmt.Printf("link_receipts=%d link_failed=%d challenges=%d challenge_failed=%d\n",
+			r.LinkReceipts, r.LinkFailed, r.Challenges, r.ChallengeFailed)
 		fmt.Printf("audits=%d flagged=%d client_flagged=%d slashed=%.2f\n", r.Audits, r.Flagged, r.ClientFlagged, r.Slashed)
 		fmt.Printf("cheat_sessions=%d audited_cheat=%d detected_cheat=%d detection_rate=%.2f\n",
 			r.CheatSessions, r.AuditedCheat, r.DetectedCheat, r.DetectionRate())

@@ -57,3 +57,26 @@ func TestUnderreportFlagsClientNotNodes(t *testing.T) {
 		t.Fatalf("underreport should not slash nodes, slashed=%.2f", r.Slashed)
 	}
 }
+
+func TestLinkReceiptsAndChallenge(t *testing.T) {
+	r := New(baseConfig()).Run()
+	if r.LinkReceipts == 0 {
+		t.Fatal("expected link receipts")
+	}
+	if r.LinkFailed != 0 {
+		t.Fatalf("honest link receipts failed: %d", r.LinkFailed)
+	}
+	if r.Challenges == 0 || r.ChallengeFailed != 0 {
+		t.Fatalf("challenges=%d failed=%d", r.Challenges, r.ChallengeFailed)
+	}
+}
+
+func TestOverreportLinkMismatch(t *testing.T) {
+	cfg := baseConfig()
+	cfg.CheatNode = "entry-0"
+	cfg.CheatFactor = 1.5
+	r := New(cfg).Run()
+	if r.LinkFailed == 0 {
+		t.Fatal("expected link receipt byte mismatch under overreport")
+	}
+}

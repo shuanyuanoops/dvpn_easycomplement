@@ -8,6 +8,7 @@ import (
 	"fmt"
 	mrand "math/rand"
 
+	dvpnlink "dvpn-sim/internal/link"
 	"dvpn-sim/internal/model"
 	"dvpn-sim/internal/onion"
 )
@@ -53,6 +54,11 @@ type Results struct {
 
 	DNSPackets    int
 	LocalDNSLeaks int
+
+	LinkReceipts    int
+	LinkFailed      int
+	Challenges      int
+	ChallengeFailed int
 }
 
 func (r Results) AvgLatencyMs() float64 {
@@ -135,6 +141,9 @@ type Sim struct {
 	counters map[string]map[model.NodeID]*counter
 	receipts map[string]map[model.NodeID]*model.Receipt
 
+	linkReceipts []*dvpnlink.Receipt
+	hashes       map[string]map[model.NodeID]map[int][32]byte
+
 	packetID int
 	res      Results
 }
@@ -165,6 +174,7 @@ func New(cfg Config) *Sim {
 		sessions:    map[string]*sessionState{},
 		counters:    map[string]map[model.NodeID]*counter{},
 		receipts:    map[string]map[model.NodeID]*model.Receipt{},
+		hashes:      map[string]map[model.NodeID]map[int][32]byte{},
 	}
 	heap.Init(&s.events)
 	s.initNodes()
@@ -261,6 +271,7 @@ func (s *Sim) Run() Results {
 				ID:          s.packetID,
 				Session:     client,
 				Kind:        "dns",
+				Seq:         -1,
 				PayloadSize: s.cfg.DNSSize,
 				Path:        circ.Path(),
 			})
@@ -273,6 +284,7 @@ func (s *Sim) Run() Results {
 				ID:      s.packetID,
 				Session: client,
 				Kind:    "data",
+				Seq:     p,
 				Path:    circ.Path(),
 			})
 			s.packetID++
@@ -331,6 +343,7 @@ func (s *Sim) handleArrive(pkt model.Packet) {
 		panic(fmt.Sprintf("peel %s: %v", node, err))
 	}
 	s.record(pkt.Session, node, int64(pkt.PayloadSize))
+	s.remember(pkt)
 
 	if next == "dest" {
 		delay := s.linkDelay(node, "dest", pkt.Size)
@@ -392,6 +405,24 @@ func (s *Sim) record(session string, hop model.NodeID, bytes int64) {
 	c.bytes += bytes
 }
 
+func (s *Sim) remember(pkt model.Packet) {
+	if pkt.Seq < 0 {
+		return
+	}
+	m := s.hashes[pkt.Session]
+	if m == nil {
+		m = map[model.NodeID]map[int][32]byte{}
+		s.hashes[pkt.Session] = m
+	}
+	node := pkt.Path[pkt.Hop]
+	hm := m[node]
+	if hm == nil {
+		hm = map[int][32]byte{}
+		m[node] = hm
+	}
+	hm[pkt.Seq] = dvpnlink.PacketHash(pkt.Session, pkt.Seq, int64(pkt.PayloadSize))
+}
+
 func (s *Sim) buildReceipts() {
 	for session, ss := range s.sessions {
 		s.receipts[session] = map[model.NodeID]*model.Receipt{}
@@ -418,6 +449,15 @@ func (s *Sim) buildReceipts() {
 			}
 			prev = h
 		}
+		path := ss.circuit.Path()
+		for i := 0; i+1 < len(path); i++ {
+			from, to := path[i], path[i+1]
+			c := s.counters[session][from]
+			if c == nil {
+				continue
+			}
+			s.linkReceipts = append(s.linkReceipts, dvpnlink.Sign(session, string(from), string(to), 1, c.packets, c.bytes, s.keys[from], s.keys[to]))
+		}
 	}
 }
 
@@ -438,6 +478,35 @@ func (s *Sim) isCheatSession(session string) bool {
 }
 
 func (s *Sim) audit() {
+	s.res.LinkReceipts = len(s.linkReceipts)
+	for _, lr := range s.linkReceipts {
+		fromPub := s.keys[model.NodeID(lr.From)].Public().(ed25519.PublicKey)
+		toPub := s.keys[model.NodeID(lr.To)].Public().(ed25519.PublicKey)
+		if !lr.Verify(fromPub, toPub) {
+			s.res.LinkFailed++
+			continue
+		}
+		c := s.counters[lr.Session][model.NodeID(lr.To)]
+		if c == nil || lr.PayloadBytes != c.bytes {
+			s.res.LinkFailed++
+		}
+	}
+	payloadSize := int64(onion.Capacity(s.cfg.CellSize, 3))
+	for session, ss := range s.sessions {
+		if s.cfg.PacketsPerSession == 0 {
+			continue
+		}
+		for k := 0; k < 3; k++ {
+			seq := s.rng.Intn(s.cfg.PacketsPerSession)
+			for _, hop := range ss.circuit.Path() {
+				s.res.Challenges++
+				ch := dvpnlink.NewChallenge(session, seq, payloadSize)
+				if !ch.Check(s.hashes[session][hop]) {
+					s.res.ChallengeFailed++
+				}
+			}
+		}
+	}
 	for session, ss := range s.sessions {
 		if s.isCheatSession(session) {
 			s.res.CheatSessions++

@@ -11,6 +11,22 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.7.0] - 2026-11-25
+
+### Added
+- Cross-signed link receipts: E-M and M-X each carry Ed25519 signatures from both
+  endpoints over `session|from|to|seqStart|seqEnd|bytes`.
+- Audit verifies both signatures and compares the sender's bytes with the
+  receiver's counter.
+- Per-packet evidence hashes and random challenge: each hop stores
+  `H(session|seq|bytes)`; audit samples 3 seqs per session.
+- Tests for `internal/link` and integration tests in `internal/sim`.
+
+### Measured
+- honest: 120 link receipts, 0 failed; 540 challenges, 0 failed.
+- overreport: 22 link receipts failed (the sessions containing entry-0).
+- underreport: 0 link failures; client flagged by the counter audit.
+
 ## [0.6.0] - 2026-11-25
 
 ### Added

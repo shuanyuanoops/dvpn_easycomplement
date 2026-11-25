@@ -31,6 +31,7 @@ func (c *Circuit) Path() []NodeID {
 
 type Packet struct {
 	ID          int
+	Seq         int
 	Session     string
 	Kind        string // "data" or "dns"
 	Size        int    // wire bytes (cell size)
