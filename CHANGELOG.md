@@ -11,6 +11,23 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.5.0] - 2026-11-25
+
+### Added
+- Reverse path: forward frames carry an 8-byte circuit id; each relay keeps a
+  `circuit -> previous peer` table; reply frames are forwarded by lookup only.
+- Client-side reply listener and RTT measurement.
+- Reply counters separated from forward counters, so the forward byte chain
+  audit stays exact.
+
+### Measured
+- 4000/4000 replies, 0% loss, RTT min 21 us / avg 132 us / max 927 us (localhost).
+- Forward audit: 0.0000% mismatch at every hop.
+
+### Known limitations
+- Circuit id is visible to all relays (linkability); reverse reply is not onion-encrypted.
+- One client per circuit.
+
 ## [0.4.0] - 2026-11-25
 
 ### Added

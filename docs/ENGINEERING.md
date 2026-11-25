@@ -35,6 +35,7 @@
 | AES-GCM 洋葱信元 | 可用（`internal/onion`） |
 | 固定 1024 B 帧 | 可用（`internal/frame`） |
 | 本机 UDP 真传输 | 可用（`cmd/relay`、`cmd/client`、`cmd/sink`） |
+| 反向路径 / RTT | 可用（circuit ID + peer table） |
 | DNS 泄漏对比 | 仿真里可用（`-dns local/tunnel`） |
 | 每跳计数 + 收据 | 仿真里有；真传输正在接 |
 | 审计/罚没 | 仿真里有；真传输正在接 |
@@ -74,9 +75,9 @@
 线上固定 1024 B：
 
 ```
-+--------+-------------------+------------------+
-| 2B len | inner onion cell  | zero padding     |
-+--------+-------------------+------------------+
++--------+--------+-----------+-------------------+------------------+
+| 2B len | 1B type| 8B circuit| inner onion cell  | zero padding     |
++--------+--------+-----------+-------------------+------------------+
 ```
 
 - 每个 relay peel 一层后，把内层重新装进 1024 B 帧再转发。
@@ -91,11 +92,17 @@
 
 ### 4.4 反向路径
 
-当前只做单向（client → sink）。真实 dVPN 需要双向：
+已实现（本机 demo）：
 
-- 方案 A：exit 维护反向电路表，按 circuit id 原路返回。
-- 方案 B：客户端与 exit 建立端到端会话，反向包再套一层洋葱。
-- 当前未做；RTT 测量也因此缺失。
+- forward 帧携带 8 B circuit ID；每个 relay 维护 `circuit -> 上一跳`。
+- exit 把 payload 原样作为 reply 帧，按 circuit 表逐跳返回；reply 帧不更新表，避免回环。
+- 客户端按 circuit ID 过滤 reply，计算 RTT。
+
+限制：
+
+- circuit ID 对所有 relay 可见，是 linkability 泄漏；真实系统应使用每跳假名或反向洋葱。
+- reply 未做逐层加密；本机 demo 可接受，公网需要补。
+- 每个 circuit 只支持单客户端；多客户端需要独立 circuit。
 
 ---
 
