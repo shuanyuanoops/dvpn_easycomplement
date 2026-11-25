@@ -11,6 +11,23 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.3.0] - 2026-11-25
+
+### Added
+- Real local UDP 3-hop transport: `cmd/relay` (entry/middle/exit), `cmd/client`,
+  `cmd/sink`.
+- Fixed 1024-byte wire frame: `[2-byte length][inner cell][zero padding]`.
+  Each relay peels one onion layer and re-frames, so the wire size stays 1024 B.
+- `scripts/run_local.sh` end-to-end demo.
+- `internal/frame` with round-trip and oversize tests.
+- Measured on localhost: 4000 cells, 3.56 MB payload, 4.096 MB wire,
+  avg one-way latency ~122 us, ~3784 pps (client pacing limited).
+
+### Known limitations
+- One-way only; no reverse path / RTT yet.
+- Keys are pre-shared via flags; no handshake.
+- Metering/audit is still in the simulator, not yet wired into the UDP transport.
+
 ## [0.2.0] - 2026-11-25
 
 ### Added

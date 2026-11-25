@@ -4,6 +4,17 @@
 
 ## 运行
 
+### 真传输（本机 UDP 三跳）
+
+```bash
+bash scripts/run_local.sh
+```
+
+会启动 `sink ← exit ← middle ← entry ← client`，发送 4000 个 1024 B 帧，
+打印吞吐、单向延迟和每个 relay 的包数/字节数。
+
+### 仿真
+
 ```bash
 go run ./cmd/sim -scenario all
 go run ./cmd/sim -scenario overreport -clients 120 -packets 50
@@ -38,8 +49,13 @@ go test ./...
 ## 目录
 
 ```
-cmd/sim/           CLI
-internal/model/    Node, Circuit, Packet, Receipt
+cmd/sim/           CLI 仿真
+cmd/relay/         真 UDP relay（entry/middle/exit）
+cmd/client/        真 UDP 客户端
+cmd/sink/          接收端，统计吞吐/延迟
+internal/frame/    1024 B 固定帧
 internal/onion/    AES-GCM 洋葱信元（build/peel）
+internal/model/    Node, Circuit, Packet, Receipt
 internal/sim/      事件循环、链路、计量、审计
+scripts/           run_local.sh
 ```
