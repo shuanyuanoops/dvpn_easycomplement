@@ -71,4 +71,5 @@ scripts/           run_local.sh
 docs/              ENGINEERING.md（设计文档）
 STATUS.md          当前状态/指标/限制
 internal/chain/     模拟链（注册/质押/结算/罚没）
+internal/merkle/    收据 Merkle root / proof
 ```

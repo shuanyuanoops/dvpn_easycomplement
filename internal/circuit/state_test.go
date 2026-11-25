@@ -3,6 +3,7 @@ package circuit
 import (
 	"net"
 	"testing"
+	"time"
 )
 
 func addr(port int) *net.UDPAddr {
@@ -51,5 +52,16 @@ func TestSameCircuitStableTag(t *testing.T) {
 	st2 := s.Forward(30, addr(1), false)
 	if st1.OutTag != st2.OutTag {
 		t.Fatal("same circuit must keep the same out tag")
+	}
+}
+
+func TestExpiry(t *testing.T) {
+	s := NewState()
+	st := s.Forward(1, addr(1), false)
+	if n := s.Cleanup(time.Now().Add(2*time.Hour), time.Hour); n != 1 {
+		t.Fatalf("removed=%d", n)
+	}
+	if _, _, ok := s.ReplyPeer(st.OutTag, false); ok {
+		t.Fatal("expired circuit must not resolve")
 	}
 }

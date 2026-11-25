@@ -3,10 +3,12 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"log"
 
 	"dvpn-sim/internal/chain"
+	"dvpn-sim/internal/merkle"
 )
 
 func key() (ed25519.PublicKey, ed25519.PrivateKey) {
@@ -57,14 +59,27 @@ func main() {
 	}
 	seal(c)
 
-	// Epoch 1 settlement: bytes measured by the node.
-	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "entry", Bytes: 1000, Epoch: 1}, client))
-	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "middle", Bytes: 800, Epoch: 1}, client))
-	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "exit", Bytes: 600, Epoch: 1}, client))
+	// Epoch 1 settlement: bytes measured by the node, with a Merkle root.
+	var leaves [][32]byte
+	for i := 0; i < 4; i++ {
+		leaves = append(leaves, sha256.Sum256([]byte(fmt.Sprintf("receipt-%d", i))))
+	}
+	tree := merkle.Build(leaves)
+	root := tree.Root()
+	proof, err := tree.Proof(2)
+	if err != nil {
+		log.Fatal(err)
+	}
+	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "entry", Bytes: 1000, Epoch: 1, Root: root}, client))
+	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "middle", Bytes: 800, Epoch: 1, Root: root}, client))
+	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "exit", Bytes: 600, Epoch: 1, Root: root}, client))
 	seal(c)
 
-	// Dispute the exit for 400.
-	submit(c, chain.Sign(chain.Tx{Type: chain.TxDispute, From: "client", Node: "exit", Amount: 400, Epoch: 1}, client))
+	// Dispute the exit for 400, with a Merkle proof of receipt-2.
+	submit(c, chain.Sign(chain.Tx{
+		Type: chain.TxDispute, From: "client", Node: "exit", Amount: 400, Epoch: 1,
+		Index: 2, Leaf: leaves[2], Proof: proof,
+	}, client))
 	seal(c)
 
 	fmt.Println("=== chain ===")

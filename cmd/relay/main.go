@@ -66,6 +66,7 @@ func main() {
 	nextAddr := flag.String("next-addr", "", "next hop UDP address")
 	destAddr := flag.String("dest", "", "destination UDP address (exit only)")
 	frameSize := flag.Int("frame", 1024, "fixed wire frame size")
+	tagTTL := flag.Duration("tag-ttl", 5*time.Minute, "idle timeout for circuit tags")
 	flag.Parse()
 
 	if *id == "" {
@@ -127,6 +128,15 @@ func main() {
 	start := time.Now()
 
 	state := circuit.NewState()
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if n := state.Cleanup(time.Now(), *tagTTL); n > 0 {
+				log.Printf("expired %d circuits", n)
+			}
+		}
+	}()
 	keys := newKeyStore()
 	var packets, bytesIn, bytesOut atomic.Uint64
 	var replyPackets, replyIn, replyOut atomic.Uint64

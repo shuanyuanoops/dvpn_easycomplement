@@ -125,7 +125,7 @@
 
 限制：
 
-- 还没有 tag 过期/清理；长期运行需要 idle timeout。
+- tag 表有 idle timeout：`-tag-ttl`（默认 5m），relay 每分钟清理一次。
 - reply 未做逐层加密；本机 demo 可接受，公网需要补。
 - 每个 circuit 只支持单客户端；多客户端需要独立 tag。
 
@@ -201,7 +201,9 @@
 | `internal/onion` | AES-GCM 逐层 build/peel |
 | `internal/frame` | 1024 B 固定帧 encode/decode |
 | `internal/sim` | 事件循环、链路、计量、审计 |
-| `internal/receipt` | 真传输的签名收据（计划） |
+| `internal/receipt` | 真传输的签名收据 |
+| `internal/merkle` | 收据 Merkle root / proof |
+| `internal/chain` | 模拟链：注册/质押/结算/罚没 |
 | `cmd/relay` | 真 UDP relay |
 | `cmd/client` | 真 UDP client |
 | `cmd/sink` | 接收端 |

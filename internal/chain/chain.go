@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+
+	"dvpn-sim/internal/merkle"
 )
 
 const MinStake = 100
@@ -29,14 +31,25 @@ type Tx struct {
 	Endpoint string
 	Region   string
 	Root     [32]byte
+	Index    int
+	Leaf     [32]byte
+	Proof    [][32]byte
 	PubKey   []byte
 	Sig      []byte
 }
 
 func (tx Tx) message() []byte {
-	return []byte(fmt.Sprintf("%s|%s|%s|%d|%d|%d|%d|%s|%s|%x",
+	return []byte(fmt.Sprintf("%s|%s|%s|%d|%d|%d|%d|%s|%s|%x|%d|%x|%s",
 		tx.Type, tx.From, tx.Node, tx.Amount, tx.Epoch, tx.Bytes, tx.Price,
-		tx.Endpoint, tx.Region, tx.Root))
+		tx.Endpoint, tx.Region, tx.Root, tx.Index, tx.Leaf, proofHex(tx.Proof)))
+}
+
+func proofHex(p [][32]byte) string {
+	out := ""
+	for _, h := range p {
+		out += fmt.Sprintf("%x", h)
+	}
+	return out
 }
 
 type Node struct {
@@ -63,17 +76,19 @@ type Block struct {
 }
 
 type Chain struct {
-	Nodes    map[string]*Node
-	Accounts map[string]*Account
-	Blocks   []Block
-	Mempool  []Tx
-	Treasury int64
+	Nodes       map[string]*Node
+	Accounts    map[string]*Account
+	Blocks      []Block
+	Mempool     []Tx
+	Treasury    int64
+	Settlements map[string]map[int64][32]byte
 }
 
 func New() *Chain {
 	c := &Chain{
-		Nodes:    map[string]*Node{},
-		Accounts: map[string]*Account{},
+		Nodes:       map[string]*Node{},
+		Accounts:    map[string]*Account{},
+		Settlements: map[string]map[int64][32]byte{},
 	}
 	genesis := Block{Height: 0}
 	genesis.Hash = blockHash(genesis)
@@ -175,11 +190,26 @@ func (c *Chain) apply(tx Tx) error {
 		acc.Balance -= cost
 		c.account(tx.Node).Balance += cost
 		n.Earned += cost
+		if c.Settlements[tx.Node] == nil {
+			c.Settlements[tx.Node] = map[int64][32]byte{}
+		}
+		c.Settlements[tx.Node][tx.Epoch] = tx.Root
 
 	case TxDispute:
 		n := c.Nodes[tx.Node]
 		if n == nil {
 			return errors.New("unknown node")
+		}
+		roots := c.Settlements[tx.Node]
+		if roots == nil {
+			return errors.New("no settlement for node")
+		}
+		root, ok := roots[tx.Epoch]
+		if !ok {
+			return errors.New("no settlement root for epoch")
+		}
+		if !merkle.Verify(root, tx.Leaf, tx.Index, tx.Proof) {
+			return errors.New("invalid merkle proof")
 		}
 		slash := tx.Amount
 		if slash > n.Stake {

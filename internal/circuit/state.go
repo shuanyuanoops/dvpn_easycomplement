@@ -5,12 +5,14 @@ import (
 	"encoding/binary"
 	"net"
 	"sync"
+	"time"
 )
 
 // FwdState is the per-circuit reverse-path state at one relay.
 type FwdState struct {
-	Prev   *net.UDPAddr
-	OutTag uint64 // 0 for an exit
+	Prev     *net.UDPAddr
+	OutTag   uint64 // 0 for an exit
+	LastSeen time.Time
 }
 
 // State maps local incoming tags to the previous peer and the rewritten
@@ -35,9 +37,10 @@ func (s *State) Forward(inTag uint64, prev *net.UDPAddr, isExit bool) *FwdState 
 	defer s.mu.Unlock()
 	if st := s.in[inTag]; st != nil {
 		st.Prev = prev
+		st.LastSeen = time.Now()
 		return st
 	}
-	st := &FwdState{Prev: prev}
+	st := &FwdState{Prev: prev, LastSeen: time.Now()}
 	if !isExit {
 		for {
 			t := randTag()
@@ -73,6 +76,23 @@ func (s *State) ReplyPeer(tag uint64, isExit bool) (*net.UDPAddr, uint64, bool) 
 		return nil, 0, false
 	}
 	return st.Prev, inTag, true
+}
+
+// Cleanup removes circuits idle for longer than ttl and returns how many.
+func (s *State) Cleanup(now time.Time, ttl time.Duration) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for tag, st := range s.in {
+		if now.Sub(st.LastSeen) > ttl {
+			delete(s.in, tag)
+			if st.OutTag != 0 {
+				delete(s.out, st.OutTag)
+			}
+			removed++
+		}
+	}
+	return removed
 }
 
 func randTag() uint64 {

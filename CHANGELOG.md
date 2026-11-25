@@ -11,6 +11,17 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.12.0] - 2026-11-25
+
+### Added
+- `internal/merkle`: Merkle tree build, proof, verify; tests for 1/2/3/5/8 leaves.
+- Chain settlement now stores the receipt Merkle root; dispute verifies
+  `leaf + index + proof` before slashing.
+- `internal/chain` tests updated for valid/invalid proofs.
+- Tag idle timeout in `internal/circuit` (`Cleanup`), relay `-tag-ttl` with a
+  one-minute cleanup goroutine; expiry test.
+- `cmd/chain` demo now settles with a Merkle root and disputes with a proof.
+
 ## [0.11.0] - 2026-11-25
 
 ### Added

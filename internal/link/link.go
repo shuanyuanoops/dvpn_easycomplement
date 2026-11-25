@@ -44,6 +44,11 @@ func (r *Receipt) Verify(senderPub, receiverPub ed25519.PublicKey) bool {
 		ed25519.Verify(receiverPub, m, r.ReceiverSig)
 }
 
+// Hash returns the canonical hash of a link receipt.
+func Hash(r *Receipt) [32]byte {
+	return sha256.Sum256(message(r.Session, r.From, r.To, r.SeqStart, r.SeqEnd, r.PayloadBytes))
+}
+
 // PacketHash is the per-packet evidence a relay must hold if it forwarded seq.
 func PacketHash(session string, seq int, bytes int64) [32]byte {
 	return sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d", session, seq, bytes)))

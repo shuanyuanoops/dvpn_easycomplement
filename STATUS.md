@@ -16,6 +16,7 @@
 | v0.9 | E+X 关联分析、cover traffic | `internal/privacy` |
 | v0.10 | 随机 hop 范围、电路分散度、批量实验表 | `TestRandomHopsAndDiversity` |
 | v0.11 | 模拟链：注册/质押/结算/罚没、Ed25519 交易、区块 | `internal/chain` |
+| v0.12 | Merkle root/proof、链上争议验 proof、tag 过期 | `internal/merkle`、`TestExpiry` |
 
 全量：`go test ./...` 通过。
 
