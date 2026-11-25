@@ -11,6 +11,20 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.13.0] - 2026-11-25
+
+### Added
+- Per-link packet loss and duplication in the simulator (`-loss`, `-dup`).
+- Tolerance-based link slashing: `sent` vs `recv` with 3-sigma loss/dup bounds
+  and slack; slash sender below min, receiver above max.
+- Median counter audit is disabled when loss/dup > 0 to avoid false positives.
+- Tests: honest 10%/10% loss/dup -> 0 link failures, 0 slash; overreport 1.5x
+  under 10%/10% -> link failures + slash.
+
+### Measured (40 clients x 20 packets, 10% loss / 10% dup)
+- honest: dropped=264 duplicated=214, link_failed=0, slashed=0.
+- overreport entry-0: link_failed=7, slashed=70, detected 7/17 cheat sessions.
+
 ## [0.12.0] - 2026-11-25
 
 ### Added

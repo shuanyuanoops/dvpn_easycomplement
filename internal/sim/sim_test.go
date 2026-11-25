@@ -135,3 +135,40 @@ func TestRandomHopsAndDiversity(t *testing.T) {
 		t.Fatalf("delivered=%d packets=%d", r.Delivered, r.Packets)
 	}
 }
+
+func TestHonestLossDupNoFalsePositive(t *testing.T) {
+	cfg := baseConfig()
+	cfg.Clients = 20
+	cfg.PacketsPerSession = 20
+	cfg.AuditProb = 1
+	cfg.LossRate = 0.1
+	cfg.DupRate = 0.1
+	r := New(cfg).Run()
+	if r.LinkFailed != 0 {
+		t.Fatalf("honest loss/dup flagged links: %d", r.LinkFailed)
+	}
+	if r.Flagged != 0 || r.Slashed != 0 {
+		t.Fatalf("honest loss/dup flagged=%d slashed=%.2f", r.Flagged, r.Slashed)
+	}
+	if r.Dropped == 0 && r.Duplicated == 0 {
+		t.Fatal("expected some loss/dup events")
+	}
+}
+
+func TestOverreportWithLossStillCaught(t *testing.T) {
+	cfg := baseConfig()
+	cfg.Clients = 40
+	cfg.PacketsPerSession = 20
+	cfg.AuditProb = 1
+	cfg.LossRate = 0.1
+	cfg.DupRate = 0.1
+	cfg.CheatNode = "entry-0"
+	cfg.CheatFactor = 1.5
+	r := New(cfg).Run()
+	if r.LinkFailed == 0 {
+		t.Fatal("expected link mismatch under overreport + loss/dup")
+	}
+	if r.Slashed == 0 {
+		t.Fatal("expected slash")
+	}
+}

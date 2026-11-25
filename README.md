@@ -23,6 +23,7 @@ go run ./cmd/sim -scenario honest -dns local
 go run ./cmd/sim -scenario honest -hops 2 -cell 512
 go run ./cmd/sim -scenario honest -cover 100
 go run ./cmd/sim -scenario honest -hops-min 3 -hops-max 5
+go run ./cmd/sim -scenario overreport -loss 0.1 -dup 0.1
 go run ./cmd/bench
 go run ./cmd/chain
 go test ./...

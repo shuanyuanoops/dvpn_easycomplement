@@ -17,6 +17,8 @@ func main() {
 	hopsMax := flag.Int("hops-max", 3, "maximum hops")
 	cell := flag.Int("cell", 1024, "cell size in bytes")
 	cover := flag.Int("cover", 0, "number of cover sessions for E+X analysis")
+	loss := flag.Float64("loss", 0, "per-link packet loss rate")
+	dup := flag.Float64("dup", 0, "per-link duplicate rate")
 	seed := flag.Int64("seed", 42, "random seed")
 	dnsMode := flag.String("dns", "tunnel", "tunnel|local")
 	flag.Parse()
@@ -37,6 +39,8 @@ func main() {
 		LinkBandwidthBps:  100 * 1024 * 1024,
 		AuditProb:         0.2,
 		Epsilon:           0.01,
+		LossRate:          *loss,
+		DupRate:           *dup,
 		CheatFactor:       1,
 		ClientCheatFactor: 1,
 	}
@@ -50,7 +54,8 @@ func main() {
 			r.Sessions, r.AvgHops, r.DistinctCircuits, r.Packets, r.Delivered)
 		fmt.Printf("avg_latency_ms=%.2f throughput_mbps=%.2f\n", r.AvgLatencyMs(), r.ThroughputMBps())
 		fmt.Printf("payload_mb=%.2f wire_mb=%.2f\n", float64(r.TotalBytes)/1e6, float64(r.WireBytes)/1e6)
-		fmt.Printf("dns_packets=%d local_dns_leaks=%d\n", r.DNSPackets, r.LocalDNSLeaks)
+		fmt.Printf("dns_packets=%d local_dns_leaks=%d dropped=%d duplicated=%d\n",
+			r.DNSPackets, r.LocalDNSLeaks, r.Dropped, r.Duplicated)
 		fmt.Printf("link_receipts=%d link_failed=%d challenges=%d challenge_failed=%d\n",
 			r.LinkReceipts, r.LinkFailed, r.Challenges, r.ChallengeFailed)
 		fmt.Printf("anonymity_set=%.2f linkability=%.2f\n", r.AnonymitySet, r.Linkability)

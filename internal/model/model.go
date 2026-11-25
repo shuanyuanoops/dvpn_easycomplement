@@ -36,6 +36,7 @@ type Packet struct {
 	Hop         int
 	SentAt      int64 // ns, 0 until the client sends it
 	Cell        []byte
+	NoDup       bool
 }
 
 type Receipt struct {

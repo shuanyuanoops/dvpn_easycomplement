@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
+	"math"
 	mrand "math/rand"
 
 	dvpnlink "dvpn-sim/internal/link"
@@ -33,6 +34,8 @@ type Config struct {
 
 	AuditProb float64
 	Epsilon   float64
+	LossRate  float64
+	DupRate   float64
 
 	CheatNode         string
 	CheatFactor       float64
@@ -62,6 +65,8 @@ type Results struct {
 	Hops             int
 	AvgHops          float64
 	DistinctCircuits int
+	Dropped          int
+	Duplicated       int
 
 	AnonymitySet float64
 	Linkability  float64
@@ -393,9 +398,20 @@ func (s *Sim) handleArrive(pkt model.Packet) {
 	s.record(pkt.Session, node, int64(pkt.PayloadSize))
 	s.remember(pkt)
 
+	if s.cfg.LossRate > 0 && s.rng.Float64() < s.cfg.LossRate {
+		s.res.Dropped++
+		return
+	}
+
 	if next == "dest" {
 		delay := s.linkDelay(node, "dest", pkt.Size)
 		s.push(2, s.now+delay, pkt)
+		if s.maybeDuplicate(pkt) {
+			dup := pkt
+			dup.NoDup = true
+			s.res.Duplicated++
+			s.push(2, s.now+delay, dup)
+		}
 		return
 	}
 	if pkt.Hop+1 >= len(pkt.Path) || next != pkt.Path[pkt.Hop+1] {
@@ -405,6 +421,19 @@ func (s *Sim) handleArrive(pkt model.Packet) {
 	pkt.Hop++
 	delay := s.linkDelay(node, next, pkt.Size)
 	s.push(1, s.now+delay, pkt)
+	if s.maybeDuplicate(pkt) {
+		dup := pkt
+		dup.NoDup = true
+		s.res.Duplicated++
+		s.push(1, s.now+delay, dup)
+	}
+}
+
+func (s *Sim) maybeDuplicate(pkt model.Packet) bool {
+	if pkt.NoDup || s.cfg.DupRate <= 0 {
+		return false
+	}
+	return s.rng.Float64() < s.cfg.DupRate
 }
 
 func (s *Sim) handleDeliver(pkt model.Packet) {
@@ -568,6 +597,7 @@ func (s *Sim) isCheatSession(session string) bool {
 
 func (s *Sim) audit() {
 	s.res.LinkReceipts = len(s.linkReceipts)
+	detected := map[string]bool{}
 	for _, lr := range s.linkReceipts {
 		fromPub := s.keys[model.NodeID(lr.From)].Public().(ed25519.PublicKey)
 		toPub := s.keys[model.NodeID(lr.To)].Public().(ed25519.PublicKey)
@@ -575,9 +605,31 @@ func (s *Sim) audit() {
 			s.res.LinkFailed++
 			continue
 		}
-		c := s.counters[lr.Session][model.NodeID(lr.To)]
-		if c == nil || lr.PayloadBytes != c.bytes {
+		recv := 0.0
+		if c := s.counters[lr.Session][model.NodeID(lr.To)]; c != nil {
+			recv = float64(c.bytes)
+		}
+		sent := float64(lr.PayloadBytes)
+		capBytes := float64(onion.Capacity(s.cfg.CellSize, 3))
+		pkts := sent / capBytes
+		slack := 0.01*sent + 2*capBytes
+		lossSigma := math.Sqrt(pkts * s.cfg.LossRate * (1 - s.cfg.LossRate))
+		dupSigma := math.Sqrt(pkts * s.cfg.DupRate * (1 - s.cfg.DupRate))
+		min := sent*(1-s.cfg.LossRate) - 3*lossSigma*capBytes - slack
+		max := sent*(1+s.cfg.DupRate) + 3*dupSigma*capBytes + slack
+		if recv < min {
 			s.res.LinkFailed++
+			s.res.Slashed += s.nodes[model.NodeID(lr.From)].Stake * 0.1
+			if s.isCheatSession(lr.Session) {
+				detected[lr.Session] = true
+			}
+		}
+		if recv > max {
+			s.res.LinkFailed++
+			s.res.Slashed += s.nodes[model.NodeID(lr.To)].Stake * 0.1
+			if s.isCheatSession(lr.Session) {
+				detected[lr.Session] = true
+			}
 		}
 	}
 	for session, ss := range s.sessions {
@@ -595,6 +647,17 @@ func (s *Sim) audit() {
 				}
 			}
 		}
+	}
+	if s.cfg.LossRate > 0 || s.cfg.DupRate > 0 {
+		// Median counter comparison is not robust to loss/dup; use link bounds only.
+		for session := range s.sessions {
+			if s.isCheatSession(session) {
+				s.res.CheatSessions++
+			}
+		}
+		s.res.DetectedCheat = len(detected)
+		s.res.AuditedCheat = s.res.CheatSessions
+		return
 	}
 	for session, ss := range s.sessions {
 		if s.isCheatSession(session) {
