@@ -1,0 +1,79 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"os"
+
+	"dvpn-sim/internal/sim"
+)
+
+func main() {
+	scenario := flag.String("scenario", "all", "honest|overreport|underreport|all")
+	clients := flag.Int("clients", 60, "number of clients/sessions")
+	packets := flag.Int("packets", 50, "packets per session")
+	seed := flag.Int64("seed", 42, "random seed")
+	flag.Parse()
+
+	base := sim.Config{
+		Seed:              *seed,
+		Clients:           *clients,
+		NodesPerRole:      3,
+		PacketsPerSession: *packets,
+		PacketSize:        1200,
+		LinkLatencyMs:     20,
+		LinkBandwidthBps:  100 * 1024 * 1024,
+		AuditProb:         0.2,
+		Epsilon:           0.01,
+		CheatFactor:       1,
+		ClientCheatFactor: 1,
+	}
+
+	printPrivacyMatrix()
+
+	run := func(name string, cfg sim.Config) {
+		r := sim.New(cfg).Run()
+		fmt.Printf("\n=== scenario=%s ===\n", name)
+		fmt.Printf("sessions=%d packets=%d delivered=%d\n", r.Sessions, r.Packets, r.Delivered)
+		fmt.Printf("avg_latency_ms=%.2f throughput_mbps=%.2f\n", r.AvgLatencyMs(), r.ThroughputMBps())
+		fmt.Printf("audits=%d flagged=%d client_flagged=%d slashed=%.2f\n", r.Audits, r.Flagged, r.ClientFlagged, r.Slashed)
+		fmt.Printf("cheat_sessions=%d audited_cheat=%d detected_cheat=%d detection_rate=%.2f\n",
+			r.CheatSessions, r.AuditedCheat, r.DetectedCheat, r.DetectionRate())
+	}
+
+	switch *scenario {
+	case "honest":
+		run("honest", base)
+	case "overreport":
+		cfg := base
+		cfg.CheatNode = "entry-0"
+		cfg.CheatFactor = 1.5
+		run("overreport", cfg)
+	case "underreport":
+		cfg := base
+		cfg.ClientCheatFactor = 0.5
+		run("underreport", cfg)
+	case "all":
+		run("honest", base)
+		cfg1 := base
+		cfg1.CheatNode = "entry-0"
+		cfg1.CheatFactor = 1.5
+		run("overreport", cfg1)
+		cfg2 := base
+		cfg2.ClientCheatFactor = 0.5
+		run("underreport", cfg2)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown scenario %q\n", *scenario)
+		os.Exit(2)
+	}
+}
+
+func printPrivacyMatrix() {
+	fmt.Println("=== knowledge matrix (3-hop) ===")
+	fmt.Println("party   C-IP   D-IP   SNI   bytes")
+	fmt.Println("C       yes    yes    yes   yes")
+	fmt.Println("E       yes    no     no    yes")
+	fmt.Println("M       no     no     no    yes")
+	fmt.Println("X       no     yes    no    yes")
+	fmt.Println("D       no     -      -     yes")
+}
