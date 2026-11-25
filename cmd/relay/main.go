@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -10,13 +12,19 @@ import (
 	"os/signal"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"dvpn-sim/internal/frame"
 	"dvpn-sim/internal/onion"
+	"dvpn-sim/internal/receipt"
 )
 
 func main() {
 	id := flag.String("id", "", "this relay's node id")
+	role := flag.String("role", "entry", "entry|middle|exit")
+	name := flag.String("name", "", "receipt name (default: id)")
+	runID := flag.String("run-id", "test", "run id for receipts")
+	receiptPath := flag.String("receipt", "", "write a signed receipt JSON here on exit")
 	keyHex := flag.String("key", "", "32-byte AES key, hex")
 	listen := flag.String("listen", "127.0.0.1:17001", "UDP listen address")
 	nextID := flag.String("next-id", "", "expected next hop id (empty for exit)")
@@ -58,11 +66,27 @@ func main() {
 		}
 	}
 
+	if *name == "" {
+		*name = *id
+	}
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		log.Fatal(err)
+	}
+	start := time.Now()
+
 	var packets, bytesIn, bytesOut atomic.Uint64
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-stop
+		if *receiptPath != "" {
+			r := receipt.New(*name, *role, *runID, start, time.Now(),
+				int64(packets.Load()), int64(bytesIn.Load()), int64(bytesOut.Load()), priv)
+			if err := receipt.Write(*receiptPath, r); err != nil {
+				log.Printf("receipt: %v", err)
+			}
+		}
 		fmt.Printf("relay %s packets=%d in=%d out=%d\n", *id, packets.Load(), bytesIn.Load(), bytesOut.Load())
 		conn.Close()
 		os.Exit(0)

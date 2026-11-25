@@ -1,17 +1,24 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"time"
+
+	"dvpn-sim/internal/receipt"
 )
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:17004", "UDP listen address")
 	duration := flag.Duration("duration", 3*time.Second, "how long to listen")
+	name := flag.String("name", "sink", "receipt name")
+	runID := flag.String("run-id", "test", "run id for receipts")
+	receiptPath := flag.String("receipt", "", "write a signed receipt JSON here")
 	flag.Parse()
 
 	addr, err := net.ResolveUDPAddr("udp", *listen)
@@ -25,6 +32,11 @@ func main() {
 	defer conn.Close()
 	_ = conn.SetReadDeadline(time.Now().Add(*duration))
 
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		log.Fatal(err)
+	}
+	start := time.Now()
 	var packets, bytes int64
 	var minLat, maxLat, sumLat time.Duration
 	buf := make([]byte, 4096)
@@ -56,6 +68,12 @@ func main() {
 	avg := time.Duration(0)
 	if packets > 0 {
 		avg = sumLat / time.Duration(packets)
+	}
+	if *receiptPath != "" {
+		r := receipt.New(*name, "sink", *runID, start, time.Now(), packets, bytes, 0, priv)
+		if err := receipt.Write(*receiptPath, r); err != nil {
+			log.Printf("receipt: %v", err)
+		}
 	}
 	fmt.Printf("sink packets=%d payload_bytes=%d min=%s avg=%s max=%s\n",
 		packets, bytes, minLat.Round(time.Microsecond), avg.Round(time.Microsecond), maxLat.Round(time.Microsecond))

@@ -11,7 +11,8 @@ bash scripts/run_local.sh
 ```
 
 会启动 `sink ← exit ← middle ← entry ← client`，发送 4000 个 1024 B 帧，
-打印吞吐、单向延迟和每个 relay 的包数/字节数。
+打印吞吐、单向延迟和每个 relay 的包数/字节数；最后用 `cmd/audit` 验证
+签名收据并检查 `client -> entry -> middle -> exit -> sink` 的字节链。
 
 ### 仿真
 
@@ -53,9 +54,11 @@ cmd/sim/           CLI 仿真
 cmd/relay/         真 UDP relay（entry/middle/exit）
 cmd/client/        真 UDP 客户端
 cmd/sink/          接收端，统计吞吐/延迟
+cmd/audit/         验签 + 字节链审计
 internal/frame/    1024 B 固定帧
 internal/onion/    AES-GCM 洋葱信元（build/peel）
 internal/model/    Node, Circuit, Packet, Receipt
 internal/sim/      事件循环、链路、计量、审计
 scripts/           run_local.sh
+docs/              ENGINEERING.md（设计文档）
 ```

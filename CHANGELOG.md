@@ -11,6 +11,19 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.4.0] - 2026-11-25
+
+### Added
+- `docs/ENGINEERING.md`: architecture, data plane, privacy, metering, failure modes,
+  and the "harder but not implemented" list.
+- Signed receipts on the real UDP transport: relay/client/sink write Ed25519 receipts.
+- `cmd/audit` verifies signatures and checks the byte-count chain
+  (client -> entry -> middle -> exit -> sink).
+
+### Measured
+- 4000 cells, 3.56 MB payload, 4.096 MB wire.
+- Audit chain mismatch: 0.0000% at every hop.
+
 ## [0.3.0] - 2026-11-25
 
 ### Added
