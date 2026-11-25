@@ -19,6 +19,7 @@ type Config struct {
 	Clients           int
 	NodesPerRole      int
 	PacketsPerSession int
+	Hops              int
 	CellSize          int
 	DNSSize           int
 	DNSMode           string // "tunnel" (through the circuit) or "local" (leaks)
@@ -54,6 +55,7 @@ type Results struct {
 
 	DNSPackets    int
 	LocalDNSLeaks int
+	Hops          int
 
 	LinkReceipts    int
 	LinkFailed      int
@@ -155,6 +157,12 @@ func New(cfg Config) *Sim {
 	if cfg.ClientCheatFactor == 0 {
 		cfg.ClientCheatFactor = 1
 	}
+	if cfg.Hops == 0 {
+		cfg.Hops = 3
+	}
+	if cfg.Hops < 2 || cfg.Hops > 4 {
+		cfg.Hops = 3
+	}
 	if cfg.CellSize == 0 {
 		cfg.CellSize = 1024
 	}
@@ -225,17 +233,28 @@ func (s *Sim) buildCircuit(client string) *model.Circuit {
 	used := map[string]bool{}
 	e := s.pick(s.entries, used)
 	used[s.nodes[e].Operator] = true
-	m := s.pick(s.middles, used)
-	used[s.nodes[m].Operator] = true
 	x := s.pick(s.exits, used)
+	used[s.nodes[x].Operator] = true
 
-	circ := &model.Circuit{
-		ID:     "circuit-" + client,
-		Client: client,
-		Entry:  e,
-		Middle: m,
-		Exit:   x,
+	nodes := []model.NodeID{e}
+	switch s.cfg.Hops {
+	case 2:
+		// entry -> exit
+	case 3:
+		m := s.pick(s.middles, used)
+		used[s.nodes[m].Operator] = true
+		nodes = append(nodes, m)
+	case 4:
+		m1 := s.pick(s.middles, used)
+		used[s.nodes[m1].Operator] = true
+		nodes = append(nodes, m1)
+		m2 := s.pick(s.middles, used)
+		used[s.nodes[m2].Operator] = true
+		nodes = append(nodes, m2)
 	}
+	nodes = append(nodes, x)
+
+	circ := &model.Circuit{ID: "circuit-" + client, Client: client, Nodes: nodes}
 	keys := map[model.NodeID][]byte{}
 	for _, id := range circ.Path() {
 		k := make([]byte, 32)
@@ -254,6 +273,7 @@ func (s *Sim) push(kind int, at int64, pkt model.Packet) {
 
 func (s *Sim) Run() Results {
 	s.res.Sessions = s.cfg.Clients
+	s.res.Hops = s.cfg.Hops
 	for c := 0; c < s.cfg.Clients; c++ {
 		client := fmt.Sprintf("client-%d", c)
 		circ := s.buildCircuit(client)
@@ -491,8 +511,8 @@ func (s *Sim) audit() {
 			s.res.LinkFailed++
 		}
 	}
-	payloadSize := int64(onion.Capacity(s.cfg.CellSize, 3))
 	for session, ss := range s.sessions {
+		payloadSize := int64(onion.Capacity(s.cfg.CellSize, len(ss.circuit.Path())))
 		if s.cfg.PacketsPerSession == 0 {
 			continue
 		}

@@ -20,14 +20,10 @@ type Node struct {
 type Circuit struct {
 	ID     string
 	Client string
-	Entry  NodeID
-	Middle NodeID
-	Exit   NodeID
+	Nodes  []NodeID // entry ... exit
 }
 
-func (c *Circuit) Path() []NodeID {
-	return []NodeID{c.Entry, c.Middle, c.Exit}
-}
+func (c *Circuit) Path() []NodeID { return c.Nodes }
 
 type Packet struct {
 	ID          int

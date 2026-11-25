@@ -11,6 +11,17 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.8.0] - 2026-11-25
+
+### Added
+- `Config.Hops` (2/3/4) and general circuit path builder.
+- `-hops` and `-cell` CLI flags.
+- `TestHops234`.
+
+### Measured (20 clients x 20 packets, DNS local)
+- hops: 2 -> 60 ms / 3.82 MB/s; 3 -> 80 ms / 3.02 MB/s; 4 -> 100 ms / 2.46 MB/s.
+- cell: 512 -> 1.29 MB/s; 1024 -> 3.02 MB/s; 1500 -> 4.64 MB/s.
+
 ## [0.7.0] - 2026-11-25
 
 ### Added

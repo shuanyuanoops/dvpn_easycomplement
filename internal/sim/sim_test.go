@@ -80,3 +80,22 @@ func TestOverreportLinkMismatch(t *testing.T) {
 		t.Fatal("expected link receipt byte mismatch under overreport")
 	}
 }
+
+func TestHops234(t *testing.T) {
+	for _, h := range []int{2, 3, 4} {
+		cfg := baseConfig()
+		cfg.Hops = h
+		cfg.Clients = 20
+		cfg.PacketsPerSession = 5
+		r := New(cfg).Run()
+		if r.Hops != h {
+			t.Fatalf("hops=%d want %d", r.Hops, h)
+		}
+		if r.Delivered != r.Packets {
+			t.Fatalf("hops=%d delivered=%d packets=%d", h, r.Delivered, r.Packets)
+		}
+		if r.LinkReceipts == 0 {
+			t.Fatalf("hops=%d no link receipts", h)
+		}
+	}
+}

@@ -12,6 +12,8 @@ func main() {
 	scenario := flag.String("scenario", "all", "honest|overreport|underreport|all")
 	clients := flag.Int("clients", 60, "number of clients/sessions")
 	packets := flag.Int("packets", 50, "packets per session")
+	hops := flag.Int("hops", 3, "2, 3 or 4")
+	cell := flag.Int("cell", 1024, "cell size in bytes")
 	seed := flag.Int64("seed", 42, "random seed")
 	dnsMode := flag.String("dns", "tunnel", "tunnel|local")
 	flag.Parse()
@@ -21,7 +23,8 @@ func main() {
 		Clients:           *clients,
 		NodesPerRole:      3,
 		PacketsPerSession: *packets,
-		CellSize:          1024,
+		Hops:              *hops,
+		CellSize:          *cell,
 		DNSSize:           200,
 		DNSMode:           *dnsMode,
 		LinkLatencyMs:     20,
@@ -37,7 +40,7 @@ func main() {
 	run := func(name string, cfg sim.Config) {
 		r := sim.New(cfg).Run()
 		fmt.Printf("\n=== scenario=%s ===\n", name)
-		fmt.Printf("sessions=%d packets=%d delivered=%d\n", r.Sessions, r.Packets, r.Delivered)
+		fmt.Printf("sessions=%d hops=%d packets=%d delivered=%d\n", r.Sessions, r.Hops, r.Packets, r.Delivered)
 		fmt.Printf("avg_latency_ms=%.2f throughput_mbps=%.2f\n", r.AvgLatencyMs(), r.ThroughputMBps())
 		fmt.Printf("payload_mb=%.2f wire_mb=%.2f\n", float64(r.TotalBytes)/1e6, float64(r.WireBytes)/1e6)
 		fmt.Printf("dns_packets=%d local_dns_leaks=%d\n", r.DNSPackets, r.LocalDNSLeaks)
