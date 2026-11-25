@@ -22,6 +22,8 @@ go run ./cmd/sim -scenario overreport -clients 120 -packets 50
 go run ./cmd/sim -scenario honest -dns local
 go run ./cmd/sim -scenario honest -hops 2 -cell 512
 go run ./cmd/sim -scenario honest -cover 100
+go run ./cmd/sim -scenario honest -hops-min 3 -hops-max 5
+go run ./cmd/bench
 go test ./...
 ```
 
@@ -66,4 +68,5 @@ internal/model/    Node, Circuit, Packet, Receipt
 internal/sim/      事件循环、链路、计量、审计
 scripts/           run_local.sh
 docs/              ENGINEERING.md（设计文档）
+STATUS.md          当前状态/指标/限制
 ```

@@ -11,6 +11,21 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.10.0] - 2026-11-25
+
+### Added
+- Random hop range: `HopsMin` / `HopsMax` (default 3..3, max 5); each session
+  picks its own length.
+- `AvgHops` and `DistinctCircuits` metrics; test for random hops + diversity.
+- `cmd/bench`: 4 hop counts x 3 cell sizes x 2 cover settings, writes
+  `results/bench.csv` and prints a Markdown table.
+- `STATUS.md`: feature/test/limit matrix.
+
+### Measured (40 clients x 20 packets, DNS local)
+- 2/3/4/5 hops at 1024 B: 60/80/100/120 ms, 6.34/5.17/4.29/3.61 MB/s.
+- cell 512/1024/1500 at 3 hops: 2.20/5.17/7.93 MB/s.
+- cover 0 -> 100 at 3 hops/1024: anon 18.25 -> 25.52, link 0.06 -> 0.04.
+
 ## [0.9.0] - 2026-11-25
 
 ### Added

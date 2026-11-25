@@ -20,7 +20,9 @@ type Config struct {
 	Clients           int
 	NodesPerRole      int
 	PacketsPerSession int
-	Hops              int
+	Hops              int // exact, if >0
+	HopsMin           int
+	HopsMax           int
 	CellSize          int
 	CoverSessions     int
 	DNSSize           int
@@ -55,9 +57,11 @@ type Results struct {
 	AuditedCheat  int
 	DetectedCheat int
 
-	DNSPackets    int
-	LocalDNSLeaks int
-	Hops          int
+	DNSPackets       int
+	LocalDNSLeaks    int
+	Hops             int
+	AvgHops          float64
+	DistinctCircuits int
 
 	AnonymitySet float64
 	Linkability  float64
@@ -164,12 +168,26 @@ func New(cfg Config) *Sim {
 	if cfg.ClientCheatFactor == 0 {
 		cfg.ClientCheatFactor = 1
 	}
-	if cfg.Hops == 0 {
-		cfg.Hops = 3
+	if cfg.Hops > 0 {
+		cfg.HopsMin = cfg.Hops
+		cfg.HopsMax = cfg.Hops
 	}
-	if cfg.Hops < 2 || cfg.Hops > 4 {
-		cfg.Hops = 3
+	if cfg.HopsMin == 0 {
+		cfg.HopsMin = 3
 	}
+	if cfg.HopsMax == 0 {
+		cfg.HopsMax = cfg.HopsMin
+	}
+	if cfg.HopsMin < 2 {
+		cfg.HopsMin = 2
+	}
+	if cfg.HopsMax < cfg.HopsMin {
+		cfg.HopsMax = cfg.HopsMin
+	}
+	if cfg.HopsMax > 5 {
+		cfg.HopsMax = 5
+	}
+	cfg.Hops = cfg.HopsMin
 	if cfg.CellSize == 0 {
 		cfg.CellSize = 1024
 	}
@@ -243,21 +261,15 @@ func (s *Sim) buildCircuit(client string) *model.Circuit {
 	x := s.pick(s.exits, used)
 	used[s.nodes[x].Operator] = true
 
+	h := s.cfg.HopsMin
+	if s.cfg.HopsMax > s.cfg.HopsMin {
+		h += s.rng.Intn(s.cfg.HopsMax - s.cfg.HopsMin + 1)
+	}
 	nodes := []model.NodeID{e}
-	switch s.cfg.Hops {
-	case 2:
-		// entry -> exit
-	case 3:
+	for i := 0; i < h-2; i++ {
 		m := s.pick(s.middles, used)
 		used[s.nodes[m].Operator] = true
 		nodes = append(nodes, m)
-	case 4:
-		m1 := s.pick(s.middles, used)
-		used[s.nodes[m1].Operator] = true
-		nodes = append(nodes, m1)
-		m2 := s.pick(s.middles, used)
-		used[s.nodes[m2].Operator] = true
-		nodes = append(nodes, m2)
 	}
 	nodes = append(nodes, x)
 
@@ -280,12 +292,16 @@ func (s *Sim) push(kind int, at int64, pkt model.Packet) {
 
 func (s *Sim) Run() Results {
 	s.res.Sessions = s.cfg.Clients
-	s.res.Hops = s.cfg.Hops
+	s.res.Hops = s.cfg.HopsMin
+	totalHops := 0
+	distinct := map[string]bool{}
 	for c := 0; c < s.cfg.Clients; c++ {
 		client := fmt.Sprintf("client-%d", c)
 		circ := s.buildCircuit(client)
 		base := int64(c) * 1_000_000
 		s.sessions[client] = &sessionState{circuit: circ, startAt: base}
+		totalHops += len(circ.Path())
+		distinct[fmt.Sprint(circ.Path())] = true
 
 		if s.cfg.DNSMode == "local" {
 			s.res.LocalDNSLeaks++
@@ -332,6 +348,10 @@ func (s *Sim) Run() Results {
 	}
 
 	s.res.DurationNs = s.now
+	if len(s.sessions) > 0 {
+		s.res.AvgHops = float64(totalHops) / float64(len(s.sessions))
+	}
+	s.res.DistinctCircuits = len(distinct)
 	s.buildReceipts()
 	s.audit()
 	s.privacyReport()

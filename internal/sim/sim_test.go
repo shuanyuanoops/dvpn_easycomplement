@@ -116,3 +116,22 @@ func TestPrivacyCover(t *testing.T) {
 		t.Fatalf("cover: set=%f want >1", r1.AnonymitySet)
 	}
 }
+
+func TestRandomHopsAndDiversity(t *testing.T) {
+	cfg := baseConfig()
+	cfg.Hops = 0
+	cfg.HopsMin = 3
+	cfg.HopsMax = 5
+	cfg.Clients = 30
+	cfg.PacketsPerSession = 5
+	r := New(cfg).Run()
+	if r.AvgHops < 3 || r.AvgHops > 5 {
+		t.Fatalf("avg hops=%f", r.AvgHops)
+	}
+	if r.DistinctCircuits < 2 {
+		t.Fatalf("distinct circuits=%d", r.DistinctCircuits)
+	}
+	if r.Delivered != r.Packets {
+		t.Fatalf("delivered=%d packets=%d", r.Delivered, r.Packets)
+	}
+}
