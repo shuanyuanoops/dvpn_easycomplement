@@ -35,7 +35,8 @@
 | AES-GCM 洋葱信元 | 可用（`internal/onion`） |
 | 固定 1024 B 帧 | 可用（`internal/frame`） |
 | 本机 UDP 真传输 | 可用（`cmd/relay`、`cmd/client`、`cmd/sink`） |
-| 反向路径 / RTT | 可用（circuit ID + peer table） |
+| 反向路径 / RTT | 可用（per-hop tag 重写） |
+| X25519 握手 / 会话密钥 | 可用（逐跳 seal + 安装） |
 | DNS 泄漏对比 | 仿真里可用（`-dns local/tunnel`） |
 | 每跳计数 + 收据 | 仿真里有；真传输正在接 |
 | 审计/罚没 | 仿真里有；真传输正在接 |
@@ -88,7 +89,10 @@
 
 - 每层：16 B next-hop + 12 B nonce + ciphertext + 16 B tag。
 - 每跳只解一层，只知道下一跳；出口才知道 `dest`。
-- 密钥当前由命令行预共享；真实系统应使用 X25519 握手派生。
+- 会话密钥通过 X25519 握手建立：client 为每跳生成 32 B 会话密钥，
+  用 relay 的静态 X25519 公钥 seal，沿链逐跳安装；不再用命令行预共享密钥。
+- relay 在 `-pubkey-out` 写静态公钥；client 用 `-pub-*` 读取。
+- handshake 帧的 tag 也按 per-hop 重写；数据帧用同一 tag 查会话密钥。
 
 ### 4.4 反向路径
 

@@ -11,6 +11,21 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.6.0] - 2026-11-25
+
+### Added
+- Tests for relay circuit state, audit chain, and X25519 handshake.
+- X25519 handshake: relay static keypair (`-pubkey-out`), client seals a fresh
+  32-byte session key per hop (`-pub-*`), relays install keys by local tag.
+  No more command-line pre-shared AES keys.
+- Handshake frames are tag-rewritten like data frames; data looks up the
+  session key by local tag.
+
+### Measured
+- 4000/4000 replies, 0% loss, RTT min 23 us / avg 124 us / max 777 us.
+- Forward audit: 0.0000% mismatch at every hop.
+- Each relay saw exactly 1 handshake.
+
 ## [0.5.1] - 2026-11-25
 
 ### Changed

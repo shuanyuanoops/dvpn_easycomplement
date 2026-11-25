@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	TypeForward byte = 0
-	TypeReply   byte = 1
-	HeaderSize       = 11 // 2 length + 1 type + 8 circuit id
+	TypeForward   byte = 0
+	TypeReply     byte = 1
+	TypeHandshake byte = 2
+	HeaderSize         = 11 // 2 length + 1 type + 8 circuit id
 )
 
 // Encode wraps an inner cell into a fixed-size wire frame:

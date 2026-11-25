@@ -16,78 +16,41 @@ import (
 	"syscall"
 	"time"
 
+	"dvpn-sim/internal/circuit"
 	"dvpn-sim/internal/frame"
+	"dvpn-sim/internal/handshake"
 	"dvpn-sim/internal/onion"
 	"dvpn-sim/internal/receipt"
 )
 
-type fwdState struct {
-	prev   *net.UDPAddr
-	outTag uint64
+type keyStore struct {
+	mu sync.Mutex
+	m  map[uint64][]byte
 }
 
-type relayState struct {
-	mu  sync.Mutex
-	in  map[uint64]*fwdState
-	out map[uint64]uint64 // outTag -> inTag
+func newKeyStore() *keyStore { return &keyStore{m: map[uint64][]byte{}} }
+
+func (k *keyStore) set(tag uint64, key []byte) {
+	k.mu.Lock()
+	k.m[tag] = append([]byte(nil), key...)
+	k.mu.Unlock()
 }
 
-func newRelayState() *relayState {
-	return &relayState{
-		in:  map[uint64]*fwdState{},
-		out: map[uint64]uint64{},
-	}
+func (k *keyStore) get(tag uint64) []byte {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.m[tag]
 }
 
-func (s *relayState) forward(inTag uint64, prev *net.UDPAddr, isExit bool) *fwdState {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if st := s.in[inTag]; st != nil {
-		st.prev = prev
-		return st
+func takeFirst(b []byte) ([]byte, []byte, error) {
+	if len(b) < 2 {
+		return nil, nil, fmt.Errorf("short handshake")
 	}
-	st := &fwdState{prev: prev}
-	if !isExit {
-		for {
-			t := randTag()
-			if _, exists := s.out[t]; !exists {
-				st.outTag = t
-				s.out[t] = inTag
-				break
-			}
-		}
+	n := int(binary.BigEndian.Uint16(b[:2]))
+	if len(b) < 2+n {
+		return nil, nil, fmt.Errorf("short handshake body")
 	}
-	s.in[inTag] = st
-	return st
-}
-
-func (s *relayState) replyPeer(tag uint64, isExit bool) (*net.UDPAddr, uint64, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if isExit {
-		st := s.in[tag]
-		if st == nil {
-			return nil, 0, false
-		}
-		return st.prev, tag, true
-	}
-	inTag, ok := s.out[tag]
-	if !ok {
-		return nil, 0, false
-	}
-	st := s.in[inTag]
-	if st == nil {
-		return nil, 0, false
-	}
-	return st.prev, inTag, true
-}
-
-func randTag() uint64 {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic(err)
-	}
-	return binary.BigEndian.Uint64(b[:])
+	return b[2 : 2+n], b[2+n:], nil
 }
 
 func main() {
@@ -96,7 +59,8 @@ func main() {
 	name := flag.String("name", "", "receipt name (default: id)")
 	runID := flag.String("run-id", "test", "run id for receipts")
 	receiptPath := flag.String("receipt", "", "write a signed receipt JSON here on exit")
-	keyHex := flag.String("key", "", "32-byte AES key, hex")
+	pubkeyOut := flag.String("pubkey-out", "", "write the X25519 public key hex here")
+	keyHex := flag.String("key", "", "optional fixed 32-byte AES key, hex (legacy)")
 	listen := flag.String("listen", "127.0.0.1:17001", "UDP listen address")
 	nextID := flag.String("next-id", "", "expected next hop id (empty for exit)")
 	nextAddr := flag.String("next-addr", "", "next hop UDP address")
@@ -104,16 +68,31 @@ func main() {
 	frameSize := flag.Int("frame", 1024, "fixed wire frame size")
 	flag.Parse()
 
-	if *id == "" || *keyHex == "" {
-		log.Fatal("-id and -key are required")
+	if *id == "" {
+		log.Fatal("-id is required")
 	}
-	key, err := hex.DecodeString(*keyHex)
-	if err != nil || len(key) != 32 {
-		log.Fatal("-key must be 32 bytes hex")
+	var fixedKey []byte
+	if *keyHex != "" {
+		k, err := hex.DecodeString(*keyHex)
+		if err != nil || len(k) != 32 {
+			log.Fatal("-key must be 32 bytes hex")
+		}
+		fixedKey = k
 	}
 	if *name == "" {
 		*name = *id
 	}
+
+	staticPub, staticPriv, err := handshake.GenerateKeyPair()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if *pubkeyOut != "" {
+		if err := os.WriteFile(*pubkeyOut, []byte(hex.EncodeToString(staticPub)+"\n"), 0o600); err != nil {
+			log.Fatalf("pubkey-out: %v", err)
+		}
+	}
+	fmt.Printf("relay %s pubkey=%s\n", *id, hex.EncodeToString(staticPub))
 
 	laddr, err := net.ResolveUDPAddr("udp", *listen)
 	if err != nil {
@@ -141,15 +120,17 @@ func main() {
 	}
 	isExit := dest != nil
 
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	_, receiptPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		log.Fatal(err)
 	}
 	start := time.Now()
 
-	state := newRelayState()
+	state := circuit.NewState()
+	keys := newKeyStore()
 	var packets, bytesIn, bytesOut atomic.Uint64
 	var replyPackets, replyIn, replyOut atomic.Uint64
+	var hsPackets atomic.Uint64
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
@@ -157,14 +138,14 @@ func main() {
 		<-stop
 		if *receiptPath != "" {
 			r := receipt.New(*name, *role, *runID, start, time.Now(),
-				int64(packets.Load()), int64(bytesIn.Load()), int64(bytesOut.Load()), priv)
+				int64(packets.Load()), int64(bytesIn.Load()), int64(bytesOut.Load()), receiptPriv)
 			if err := receipt.Write(*receiptPath, r); err != nil {
 				log.Printf("receipt: %v", err)
 			}
 		}
-		fmt.Printf("relay %s packets=%d in=%d out=%d replies=%d reply_in=%d reply_out=%d\n",
+		fmt.Printf("relay %s packets=%d in=%d out=%d replies=%d reply_in=%d reply_out=%d handshakes=%d\n",
 			*id, packets.Load(), bytesIn.Load(), bytesOut.Load(),
-			replyPackets.Load(), replyIn.Load(), replyOut.Load())
+			replyPackets.Load(), replyIn.Load(), replyOut.Load(), hsPackets.Load())
 		conn.Close()
 		os.Exit(0)
 	}()
@@ -182,10 +163,42 @@ func main() {
 			continue
 		}
 
+		if typ == frame.TypeHandshake {
+			hsPackets.Add(1)
+			sealed, rest, err := takeFirst(inner)
+			if err != nil {
+				log.Printf("handshake: %v", err)
+				continue
+			}
+			key, err := handshake.Open(staticPriv, sealed)
+			if err != nil {
+				log.Printf("handshake open: %v", err)
+				continue
+			}
+			st := state.Forward(tag, remote, isExit)
+			keys.set(tag, key)
+			if isExit {
+				continue
+			}
+			if next == nil {
+				log.Printf("handshake with no next")
+				continue
+			}
+			out, err := frame.Encode(rest, *frameSize, frame.TypeHandshake, st.OutTag)
+			if err != nil {
+				log.Printf("handshake encode: %v", err)
+				continue
+			}
+			if _, err := conn.WriteToUDP(out, next); err != nil {
+				log.Printf("handshake forward: %v", err)
+			}
+			continue
+		}
+
 		if typ == frame.TypeReply {
 			replyPackets.Add(1)
 			replyIn.Add(uint64(n))
-			peer, outTag, ok := state.replyPeer(tag, isExit)
+			peer, outTag, ok := state.ReplyPeer(tag, isExit)
 			if !ok {
 				log.Printf("reply for unknown tag %d", tag)
 				continue
@@ -205,7 +218,16 @@ func main() {
 
 		packets.Add(1)
 		bytesIn.Add(uint64(n))
-		st := state.forward(tag, remote, isExit)
+		st := state.Forward(tag, remote, isExit)
+
+		key := fixedKey
+		if key == nil {
+			key = keys.get(tag)
+		}
+		if key == nil {
+			log.Printf("no key for tag %d", tag)
+			continue
+		}
 
 		nextHop, inner2, err := onion.Peel(inner, key)
 		if err != nil {
@@ -225,7 +247,7 @@ func main() {
 			}
 			out, err := frame.Encode(inner2, *frameSize, frame.TypeReply, tag)
 			if err == nil {
-				if _, err := conn.WriteToUDP(out, st.prev); err != nil {
+				if _, err := conn.WriteToUDP(out, st.Prev); err != nil {
 					log.Printf("write reply: %v", err)
 				} else {
 					replyOut.Add(uint64(len(out)))
@@ -242,7 +264,7 @@ func main() {
 			log.Printf("next hop mismatch: got %s want %s", nextHop, *nextID)
 			continue
 		}
-		out, err := frame.Encode(inner2, *frameSize, frame.TypeForward, st.outTag)
+		out, err := frame.Encode(inner2, *frameSize, frame.TypeForward, st.OutTag)
 		if err != nil {
 			log.Printf("encode: %v", err)
 			continue
