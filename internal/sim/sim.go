@@ -9,6 +9,7 @@ import (
 	mrand "math/rand"
 
 	"dvpn-sim/internal/model"
+	"dvpn-sim/internal/onion"
 )
 
 // Config controls one simulation run.
@@ -17,17 +18,19 @@ type Config struct {
 	Clients           int
 	NodesPerRole      int
 	PacketsPerSession int
-	PacketSize        int
+	CellSize          int
+	DNSSize           int
+	DNSMode           string // "tunnel" (through the circuit) or "local" (leaks)
 
 	LinkLatencyMs    int64
 	LinkBandwidthBps int64
 
-	AuditProb float64 // probability that a session is audited
-	Epsilon   float64 // relative mismatch allowed before flagging
+	AuditProb float64
+	Epsilon   float64
 
-	CheatNode         string  // node ID that over-reports; "" = none
-	CheatFactor       float64 // over-report multiplier for CheatNode
-	ClientCheatFactor float64 // client's reported multiplier; 1 = honest
+	CheatNode         string
+	CheatFactor       float64
+	ClientCheatFactor float64
 }
 
 // Results is what the CLI prints.
@@ -35,7 +38,8 @@ type Results struct {
 	Sessions       int
 	Packets        int
 	Delivered      int
-	TotalBytes     int64
+	TotalBytes     int64 // billable payload bytes delivered
+	WireBytes      int64 // cell bytes sent
 	TotalLatencyNs int64
 	DurationNs     int64
 
@@ -46,6 +50,9 @@ type Results struct {
 	CheatSessions int
 	AuditedCheat  int
 	DetectedCheat int
+
+	DNSPackets    int
+	LocalDNSLeaks int
 }
 
 func (r Results) AvgLatencyMs() float64 {
@@ -118,6 +125,8 @@ type Sim struct {
 	exits   []model.NodeID
 	keys    map[model.NodeID]ed25519.PrivateKey
 
+	circuitKeys map[string]map[model.NodeID][]byte
+
 	links  map[string]*link
 	events eventHeap
 	now    int64
@@ -137,15 +146,25 @@ func New(cfg Config) *Sim {
 	if cfg.ClientCheatFactor == 0 {
 		cfg.ClientCheatFactor = 1
 	}
+	if cfg.CellSize == 0 {
+		cfg.CellSize = 1024
+	}
+	if cfg.DNSSize == 0 {
+		cfg.DNSSize = 200
+	}
+	if cfg.DNSMode == "" {
+		cfg.DNSMode = "tunnel"
+	}
 	s := &Sim{
-		cfg:      cfg,
-		rng:      mrand.New(mrand.NewSource(cfg.Seed)),
-		nodes:    map[model.NodeID]*model.Node{},
-		keys:     map[model.NodeID]ed25519.PrivateKey{},
-		links:    map[string]*link{},
-		sessions: map[string]*sessionState{},
-		counters: map[string]map[model.NodeID]*counter{},
-		receipts: map[string]map[model.NodeID]*model.Receipt{},
+		cfg:         cfg,
+		rng:         mrand.New(mrand.NewSource(cfg.Seed)),
+		nodes:       map[model.NodeID]*model.Node{},
+		keys:        map[model.NodeID]ed25519.PrivateKey{},
+		circuitKeys: map[string]map[model.NodeID][]byte{},
+		links:       map[string]*link{},
+		sessions:    map[string]*sessionState{},
+		counters:    map[string]map[model.NodeID]*counter{},
+		receipts:    map[string]map[model.NodeID]*model.Receipt{},
 	}
 	heap.Init(&s.events)
 	s.initNodes()
@@ -199,13 +218,24 @@ func (s *Sim) buildCircuit(client string) *model.Circuit {
 	m := s.pick(s.middles, used)
 	used[s.nodes[m].Operator] = true
 	x := s.pick(s.exits, used)
-	return &model.Circuit{
+
+	circ := &model.Circuit{
 		ID:     "circuit-" + client,
 		Client: client,
 		Entry:  e,
 		Middle: m,
 		Exit:   x,
 	}
+	keys := map[model.NodeID][]byte{}
+	for _, id := range circ.Path() {
+		k := make([]byte, 32)
+		if _, err := rand.Read(k); err != nil {
+			panic(err)
+		}
+		keys[id] = k
+	}
+	s.circuitKeys[circ.ID] = keys
+	return circ
 }
 
 func (s *Sim) push(kind int, at int64, pkt model.Packet) {
@@ -214,17 +244,35 @@ func (s *Sim) push(kind int, at int64, pkt model.Packet) {
 
 func (s *Sim) Run() Results {
 	s.res.Sessions = s.cfg.Clients
-	// Build one circuit per client and schedule its packets.
 	for c := 0; c < s.cfg.Clients; c++ {
 		client := fmt.Sprintf("client-%d", c)
 		circ := s.buildCircuit(client)
 		s.sessions[client] = &sessionState{circuit: circ}
-		base := int64(c) * 1_000_000 // stagger clients by 1ms
+		base := int64(c) * 1_000_000
+
+		if s.cfg.DNSMode == "local" {
+			s.res.LocalDNSLeaks++
+		} else {
+			at := base - 1_000_000
+			if at < 0 {
+				at = 0
+			}
+			s.push(0, at, model.Packet{
+				ID:          s.packetID,
+				Session:     client,
+				Kind:        "dns",
+				PayloadSize: s.cfg.DNSSize,
+				Path:        circ.Path(),
+			})
+			s.packetID++
+			s.res.DNSPackets++
+		}
+
 		for p := 0; p < s.cfg.PacketsPerSession; p++ {
 			s.push(0, base+int64(p)*1_000_000, model.Packet{
 				ID:      s.packetID,
 				Session: client,
-				Size:    s.cfg.PacketSize,
+				Kind:    "data",
 				Path:    circ.Path(),
 			})
 			s.packetID++
@@ -252,11 +300,23 @@ func (s *Sim) Run() Results {
 
 func (s *Sim) handleSend(pkt model.Packet) {
 	ss := s.sessions[pkt.Session]
+	if pkt.PayloadSize == 0 {
+		pkt.PayloadSize = onion.Capacity(s.cfg.CellSize, len(pkt.Path))
+	}
+	payload := make([]byte, pkt.PayloadSize)
+	cell, err := onion.Build(pkt.Path, payload, s.circuitKeys[ss.circuit.ID], s.cfg.CellSize)
+	if err != nil {
+		panic(fmt.Sprintf("build onion: %v", err))
+	}
+
 	ss.packets++
-	reported := int64(float64(pkt.Size) * s.cfg.ClientCheatFactor)
+	reported := int64(float64(pkt.PayloadSize) * s.cfg.ClientCheatFactor)
 	ss.clientBytes += reported
 	s.res.Packets++
+	s.res.WireBytes += int64(len(cell))
 
+	pkt.Cell = cell
+	pkt.Size = len(cell)
 	pkt.SentAt = s.now
 	pkt.Hop = 0
 	delay := s.linkDelay("client", pkt.Path[0], pkt.Size)
@@ -264,23 +324,31 @@ func (s *Sim) handleSend(pkt model.Packet) {
 }
 
 func (s *Sim) handleArrive(pkt model.Packet) {
+	ss := s.sessions[pkt.Session]
 	node := pkt.Path[pkt.Hop]
-	s.record(pkt.Session, node, int64(pkt.Size))
+	next, inner, err := onion.Peel(pkt.Cell, s.circuitKeys[ss.circuit.ID][node])
+	if err != nil {
+		panic(fmt.Sprintf("peel %s: %v", node, err))
+	}
+	s.record(pkt.Session, node, int64(pkt.PayloadSize))
 
-	if pkt.Hop == len(pkt.Path)-1 {
+	if next == "dest" {
 		delay := s.linkDelay(node, "dest", pkt.Size)
 		s.push(2, s.now+delay, pkt)
 		return
 	}
-	next := pkt.Path[pkt.Hop+1]
-	delay := s.linkDelay(node, next, pkt.Size)
+	if pkt.Hop+1 >= len(pkt.Path) || next != pkt.Path[pkt.Hop+1] {
+		panic(fmt.Sprintf("onion next=%s, path next=%v", next, pkt.Path))
+	}
+	pkt.Cell = inner
 	pkt.Hop++
+	delay := s.linkDelay(node, next, pkt.Size)
 	s.push(1, s.now+delay, pkt)
 }
 
 func (s *Sim) handleDeliver(pkt model.Packet) {
 	s.res.Delivered++
-	s.res.TotalBytes += int64(pkt.Size)
+	s.res.TotalBytes += int64(pkt.PayloadSize)
 	s.res.TotalLatencyNs += s.now - pkt.SentAt
 	ss := s.sessions[pkt.Session]
 	ss.delivered++
@@ -382,8 +450,6 @@ func (s *Sim) audit() {
 			s.res.AuditedCheat++
 		}
 
-		// Four measurements: client + E/M/X. The median is the robust estimate;
-		// a single outlier is the suspect.
 		vals := []int64{ss.clientBytes}
 		for _, hop := range ss.circuit.Path() {
 			c := s.counters[session][hop]

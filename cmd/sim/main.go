@@ -13,6 +13,7 @@ func main() {
 	clients := flag.Int("clients", 60, "number of clients/sessions")
 	packets := flag.Int("packets", 50, "packets per session")
 	seed := flag.Int64("seed", 42, "random seed")
+	dnsMode := flag.String("dns", "tunnel", "tunnel|local")
 	flag.Parse()
 
 	base := sim.Config{
@@ -20,7 +21,9 @@ func main() {
 		Clients:           *clients,
 		NodesPerRole:      3,
 		PacketsPerSession: *packets,
-		PacketSize:        1200,
+		CellSize:          1024,
+		DNSSize:           200,
+		DNSMode:           *dnsMode,
 		LinkLatencyMs:     20,
 		LinkBandwidthBps:  100 * 1024 * 1024,
 		AuditProb:         0.2,
@@ -36,6 +39,8 @@ func main() {
 		fmt.Printf("\n=== scenario=%s ===\n", name)
 		fmt.Printf("sessions=%d packets=%d delivered=%d\n", r.Sessions, r.Packets, r.Delivered)
 		fmt.Printf("avg_latency_ms=%.2f throughput_mbps=%.2f\n", r.AvgLatencyMs(), r.ThroughputMBps())
+		fmt.Printf("payload_mb=%.2f wire_mb=%.2f\n", float64(r.TotalBytes)/1e6, float64(r.WireBytes)/1e6)
+		fmt.Printf("dns_packets=%d local_dns_leaks=%d\n", r.DNSPackets, r.LocalDNSLeaks)
 		fmt.Printf("audits=%d flagged=%d client_flagged=%d slashed=%.2f\n", r.Audits, r.Flagged, r.ClientFlagged, r.Slashed)
 		fmt.Printf("cheat_sessions=%d audited_cheat=%d detected_cheat=%d detection_rate=%.2f\n",
 			r.CheatSessions, r.AuditedCheat, r.DetectedCheat, r.DetectionRate())

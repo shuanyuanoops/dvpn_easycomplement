@@ -30,12 +30,15 @@ func (c *Circuit) Path() []NodeID {
 }
 
 type Packet struct {
-	ID      int
-	Session string
-	Size    int
-	Path    []NodeID
-	Hop     int
-	SentAt  int64 // ns, 0 until the client sends it
+	ID          int
+	Session     string
+	Kind        string // "data" or "dns"
+	Size        int    // wire bytes (cell size)
+	PayloadSize int    // billable payload bytes
+	Path        []NodeID
+	Hop         int
+	SentAt      int64 // ns, 0 until the client sends it
+	Cell        []byte
 }
 
 type Receipt struct {
