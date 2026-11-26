@@ -81,6 +81,7 @@ func main() {
 	tunMode := flag.Bool("tun", false, "exit: write payloads to a TUN device and return its packets")
 	tunName := flag.String("tun-name", "dvpn1", "exit TUN device name")
 	tunMTU := flag.Int("tun-mtu", 800, "exit TUN MTU (must fit the onion payload)")
+	tunIP := flag.String("tun-ip", "10.99.0.1/24", "exit TUN address (CIDR)")
 	flag.Parse()
 
 	if *id == "" {
@@ -196,12 +197,16 @@ func main() {
 			log.Fatalf("tun %s: %v", *tunName, err)
 		}
 		defer tunDev.Close()
-		log.Printf("tun device %s mtu=%d", tunDev.Name(), *tunMTU)
+		if err := tun.Configure(tunDev.Name(), *tunIP, *tunMTU); err != nil {
+			log.Fatalf("tun configure: %v", err)
+		}
+		log.Printf("tun device %s ip=%s mtu=%d", tunDev.Name(), *tunIP, *tunMTU)
 		go func() {
 			buf := make([]byte, *tunMTU)
 			for {
 				n, err := tunDev.Read(buf)
 				if err != nil {
+					log.Printf("tun read: %v", err)
 					return
 				}
 				tunMu.Lock()

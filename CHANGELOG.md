@@ -11,6 +11,21 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.18.0] - 2026-11-26
+
+### Added
+- TUN data plane works end-to-end in a two-namespace lab:
+  client TUN 10.99.0.2 -> UDP onion -> exit TUN 10.99.0.1 -> local HTTP.
+- `internal/tun.Configure`: assign address/MTU/up via iproute2.
+- `cmd/client` and exit relay now configure their TUN device.
+- `scripts/run_tun_lab.sh`: user-namespace + veth lab, no root required.
+- TUN read/write uses raw syscalls (`/dev/net/tun` is not pollable by the Go
+  runtime poller).
+
+### Measured
+- `curl http://10.99.0.1:8080/` through the TUN path returns the HTTP directory
+  listing; `run_cluster.sh` regression still 4000/4000 and audit clean.
+
 ## [0.17.0] - 2026-11-26
 
 ### Added

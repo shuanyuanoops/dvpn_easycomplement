@@ -83,6 +83,7 @@ func main() {
 	tunMode := flag.Bool("tun", false, "TUN data plane: read/write raw IP packets instead of synthetic payloads")
 	tunName := flag.String("tun-name", "dvpn0", "TUN device name")
 	tunMTU := flag.Int("tun-mtu", 800, "TUN MTU (must fit the onion payload)")
+	tunIP := flag.String("tun-ip", "10.99.0.2/24", "TUN address (CIDR)")
 	flag.Parse()
 
 	ids := strings.Split(*pathStr, ",")
@@ -234,7 +235,10 @@ func main() {
 			log.Fatalf("tun %s: %v", *tunName, err)
 		}
 		defer tunDev.Close()
-		log.Printf("tun device %s mtu=%d", tunDev.Name(), *tunMTU)
+		if err := tun.Configure(tunDev.Name(), *tunIP, *tunMTU); err != nil {
+			log.Fatalf("tun configure: %v", err)
+		}
+		log.Printf("tun device %s ip=%s mtu=%d", tunDev.Name(), *tunIP, *tunMTU)
 	}
 
 	var mu sync.Mutex
@@ -342,6 +346,7 @@ func main() {
 		for {
 			n, err := tunDev.Read(buf)
 			if err != nil {
+				log.Printf("tun read: %v", err)
 				break
 			}
 			if n == 0 {

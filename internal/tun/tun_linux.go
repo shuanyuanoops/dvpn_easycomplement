@@ -54,13 +54,19 @@ func Open(name string) (*Native, error) {
 	if actual == "" {
 		actual = name
 	}
+	_ = syscall.SetNonblock(int(f.Fd()), false)
 	return &Native{f: f, name: actual}, nil
 }
 
-func (d *Native) Read(p []byte) (int, error)  { return d.f.Read(p) }
-func (d *Native) Write(p []byte) (int, error) { return d.f.Write(p) }
-func (d *Native) Close() error                { return d.f.Close() }
-func (d *Native) Name() string                { return d.name }
+func (d *Native) Read(p []byte) (int, error) {
+	return syscall.Read(int(d.f.Fd()), p)
+}
+
+func (d *Native) Write(p []byte) (int, error) {
+	return syscall.Write(int(d.f.Fd()), p)
+}
+func (d *Native) Close() error { return d.f.Close() }
+func (d *Native) Name() string { return d.name }
 
 // Pump copies raw IP packets from src to dst until either side errors.
 func Pump(src, dst Device, mtu int) error {
