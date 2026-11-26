@@ -11,6 +11,22 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.19.0] - 2026-11-26
+
+### Added
+- Real transport link receipts: each relay records per-link sent/recv counts
+  and per-seq packet hashes, keyed by the shared link tag.
+- Relay `-control-addr`: HTTP `/links` returns signed sender/receiver halves;
+  `/hash?tag=&seq=` returns a signed packet hash.
+- `cmd/linkaudit`: pairs halves by tag, verifies both signatures and counts,
+  then challenges sampled packets.
+- `run_cluster.sh` starts six control endpoints and audits the assigned circuit.
+
+### Measured
+- `linkaudit links=2 ok=2 failed=0 challenges=6 ok_challenges=6`
+  (entry->middle and middle->exit, 3 challenges each).
+- TUN lab still returns HTTP through the TUN data plane.
+
 ## [0.18.0] - 2026-11-26
 
 ### Added

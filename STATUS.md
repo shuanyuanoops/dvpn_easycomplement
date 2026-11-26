@@ -24,6 +24,7 @@
 | v0.16 | 注册表 + controller 随机选路、routes 路由表、2×2×2 集群脚本 | `internal/registry`、`run_cluster.sh` |
 | v0.17 | TUN 设备 + client/exit TUN 模式 | `internal/tun`、`TestOpenTUN` |
 | v0.18 | TUN 端到端数据面（client TUN → 洋葱 → exit TUN → HTTP） | `scripts/run_tun_lab.sh` |
+| v0.19 | 真传输逐链路双签 + 挑战 | `cmd/linkaudit`、`run_cluster.sh` |
 
 全量：`go test ./...` 通过。
 
@@ -45,7 +46,7 @@ go run ./cmd/chain` → `results/bench.csv`。
 ## 已知限制
 
 - 集群 demo 有 2 个 entry / 2 个 middle / 2 个 exit，controller 随机分配；controller 只监听本地、无鉴权。
-- 真传输有身份绑定/ACK/反向加密/seq；TUN 数据面已跑通；交叉签/挑战仍只在仿真里。
+- 真传输有身份绑定/ACK/反向加密/seq；TUN 数据面已跑通；逐链路双签/挑战已进真传输。
 - 挑战只能抓“没转发”，抓不到“转了却多报字节”；后者靠交叉签字节比对。
 - tag 表没有 idle 过期。
 - cover 是合成观测，不是真实 cover 流量。

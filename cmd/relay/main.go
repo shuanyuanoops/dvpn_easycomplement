@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +24,7 @@ import (
 	"dvpn-sim/internal/frame"
 	"dvpn-sim/internal/handshake"
 	"dvpn-sim/internal/identity"
+	"dvpn-sim/internal/link"
 	"dvpn-sim/internal/model"
 	"dvpn-sim/internal/onion"
 	"dvpn-sim/internal/receipt"
@@ -31,6 +34,136 @@ import (
 // hopFieldSize is the width of a node id in an onion next-hop field and in the
 // next-hop prefix of a sealed handshake message.
 const hopFieldSize = 16
+
+type linkStat struct {
+	tag       uint64
+	from      string
+	to        string
+	sentPkts  int64
+	sentBytes int64
+	recvPkts  int64
+	recvBytes int64
+	hashes    map[int][32]byte
+}
+
+type tracker struct {
+	mu   sync.Mutex
+	m    map[uint64]*linkStat
+	id   string
+	pub  ed25519.PublicKey
+	priv ed25519.PrivateKey
+}
+
+func newTracker(id string, pub ed25519.PublicKey, priv ed25519.PrivateKey) *tracker {
+	return &tracker{m: map[uint64]*linkStat{}, id: id, pub: pub, priv: priv}
+}
+
+func (t *tracker) stat(tag uint64) *linkStat {
+	st := t.m[tag]
+	if st == nil {
+		st = &linkStat{tag: tag, hashes: map[int][32]byte{}}
+		t.m[tag] = st
+	}
+	return st
+}
+
+func (t *tracker) sender(tag uint64, from, to string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	st := t.stat(tag)
+	st.from, st.to = from, to
+}
+
+func (t *tracker) receiver(tag uint64, to string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	st := t.stat(tag)
+	st.to = to
+}
+
+func (t *tracker) sent(tag uint64, seq uint64, n int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	st := t.stat(tag)
+	st.sentPkts++
+	st.sentBytes += int64(n)
+	st.hashes[int(seq)] = link.PacketHash(fmt.Sprintf("%d", tag), int(seq), int64(n))
+}
+
+func (t *tracker) recv(tag uint64, seq uint64, n int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	st := t.stat(tag)
+	st.recvPkts++
+	st.recvBytes += int64(n)
+	st.hashes[int(seq)] = link.PacketHash(fmt.Sprintf("%d", tag), int(seq), int64(n))
+}
+
+func (t *tracker) halves() []link.Half {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var out []link.Half
+	pub := hex.EncodeToString(t.pub)
+	for _, st := range t.m {
+		tag := fmt.Sprintf("%d", st.tag)
+		if st.sentPkts > 0 {
+			h := link.Half{Tag: tag, From: st.from, To: st.to, Role: "sender", Packets: st.sentPkts, Bytes: st.sentBytes, Pub: pub}
+			link.SignHalf(&h, t.priv)
+			out = append(out, h)
+		}
+		if st.recvPkts > 0 {
+			h := link.Half{Tag: tag, To: t.id, Role: "receiver", Packets: st.recvPkts, Bytes: st.recvBytes, Pub: pub}
+			link.SignHalf(&h, t.priv)
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+func (t *tracker) hashProof(tag string, seq int) (link.HashProof, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, st := range t.m {
+		if fmt.Sprintf("%d", st.tag) != tag {
+			continue
+		}
+		h, ok := st.hashes[seq]
+		if !ok {
+			return link.HashProof{}, false
+		}
+		p := link.HashProof{Tag: tag, Seq: seq, Hash: hex.EncodeToString(h[:]), Pub: hex.EncodeToString(t.pub)}
+		link.SignHash(&p, t.priv)
+		return p, true
+	}
+	return link.HashProof{}, false
+}
+
+func (t *tracker) serve(addr string) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/links", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(t.halves())
+	})
+	mux.HandleFunc("/hash", func(w http.ResponseWriter, r *http.Request) {
+		seq, err := strconv.Atoi(r.URL.Query().Get("seq"))
+		if err != nil {
+			http.Error(w, "bad seq", http.StatusBadRequest)
+			return
+		}
+		p, ok := t.hashProof(r.URL.Query().Get("tag"), seq)
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(p)
+	})
+	go func() {
+		if err := http.ListenAndServe(addr, mux); err != nil {
+			log.Printf("control %s: %v", addr, err)
+		}
+	}()
+}
 
 type keyStore struct {
 	mu sync.Mutex
@@ -82,6 +215,7 @@ func main() {
 	tunName := flag.String("tun-name", "dvpn1", "exit TUN device name")
 	tunMTU := flag.Int("tun-mtu", 800, "exit TUN MTU (must fit the onion payload)")
 	tunIP := flag.String("tun-ip", "10.99.0.1/24", "exit TUN address (CIDR)")
+	controlAddr := flag.String("control-addr", "", "HTTP control address for link receipts/challenges (e.g. 127.0.0.1:17201)")
 	flag.Parse()
 
 	if *id == "" {
@@ -182,6 +316,10 @@ func main() {
 	keys := newKeyStore()
 	replyKeys := newKeyStore()
 	hsNonces := newKeyStore()
+	tr := newTracker(*id, identityPub, identityPriv)
+	if *controlAddr != "" {
+		tr.serve(*controlAddr)
+	}
 
 	var tunDev *tun.Native
 	type tunPeer struct {
@@ -263,6 +401,9 @@ func main() {
 			log.Printf("bad frame: %v", err)
 			continue
 		}
+		if typ == frame.TypeForward {
+			tr.recv(tag, seq, len(inner))
+		}
 
 		if typ == frame.TypeHandshake {
 			hsPackets.Add(1)
@@ -306,6 +447,7 @@ func main() {
 				continue
 			}
 			keys.set(tag, sessionKey)
+			tr.sender(st.OutTag, *id, string(hop))
 			nextHopAddr, ok := rt.resolve(hop)
 			if !ok {
 				continue
@@ -415,6 +557,7 @@ func main() {
 		if !ok {
 			continue
 		}
+		tr.sent(st.OutTag, seq, len(inner2))
 		out, err := frame.Encode(inner2, *frameSize, frame.TypeForward, st.OutTag, seq)
 		if err != nil {
 			log.Printf("encode: %v", err)

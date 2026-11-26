@@ -18,6 +18,7 @@ RELAYS=/tmp/dvpn_relays.json
 CONTROLLER_LOG=/tmp/dvpn_controller.log
 
 go build -o bin/relay ./cmd/relay
+go build -o bin/linkaudit ./cmd/linkaudit
 go build -o bin/client ./cmd/client
 go build -o bin/sink ./cmd/sink
 go build -o bin/audit ./cmd/audit
@@ -116,6 +117,7 @@ for i in 0 1; do
   id="entry-$i"
   ./bin/relay -id "$id" -role entry -name "$id" -listen "127.0.0.1:$((17101 + i))" \
     -routes "$ROUTES" -identity-out "/tmp/dvpn_$id.id" -receipt "/tmp/dvpn_$id.json" \
+    -control-addr "127.0.0.1:$((17201 + i))" \
     > "/tmp/dvpn_$id.log" 2>&1 &
   relay_pids+=($!)
 done
@@ -123,6 +125,7 @@ for i in 0 1; do
   id="middle-$i"
   ./bin/relay -id "$id" -role middle -name "$id" -listen "127.0.0.1:$((17103 + i))" \
     -routes "$ROUTES" -identity-out "/tmp/dvpn_$id.id" -receipt "/tmp/dvpn_$id.json" \
+    -control-addr "127.0.0.1:$((17203 + i))" \
     > "/tmp/dvpn_$id.log" 2>&1 &
   relay_pids+=($!)
 done
@@ -130,6 +133,7 @@ for i in 0 1; do
   id="exit-$i"
   ./bin/relay -id "$id" -role exit -name "$id" -listen "127.0.0.1:$((17105 + i))" \
     -dest "$SINK_ADDR" -identity-out "/tmp/dvpn_$id.id" -receipt "/tmp/dvpn_$id.json" \
+    -control-addr "127.0.0.1:$((17205 + i))" \
     > "/tmp/dvpn_$id.log" 2>&1 &
   relay_pids+=($!)
 done
@@ -158,6 +162,13 @@ if ! ./bin/client -controller "http://$CONTROLLER_ADDR" -n 4000 -rate 4000 \
   exit 1
 fi
 sleep 1
+
+if ! ./bin/linkaudit -relays "entry-0=http://127.0.0.1:17201,entry-1=http://127.0.0.1:17202,middle-0=http://127.0.0.1:17203,middle-1=http://127.0.0.1:17204,exit-0=http://127.0.0.1:17205,exit-1=http://127.0.0.1:17206" > /tmp/dvpn_linkaudit.log 2>&1; then
+  echo "ERROR: linkaudit failed" >&2
+  cat /tmp/dvpn_linkaudit.log >&2 || true
+  exit 1
+fi
+cat /tmp/dvpn_linkaudit.log
 
 line=$(grep -E '^assign ' "$CONTROLLER_LOG" | tail -1 || true)
 if [ -z "$line" ]; then
