@@ -5,12 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -20,9 +22,14 @@ import (
 	"dvpn-sim/internal/frame"
 	"dvpn-sim/internal/handshake"
 	"dvpn-sim/internal/identity"
+	"dvpn-sim/internal/model"
 	"dvpn-sim/internal/onion"
 	"dvpn-sim/internal/receipt"
 )
+
+// hopFieldSize is the width of a node id in an onion next-hop field and in the
+// next-hop prefix of a sealed handshake message.
+const hopFieldSize = 16
 
 type keyStore struct {
 	mu sync.Mutex
@@ -64,8 +71,9 @@ func main() {
 	identityOut := flag.String("identity-out", "", "write the signed identity document here")
 	keyHex := flag.String("key", "", "optional fixed 32-byte AES key, hex (legacy)")
 	listen := flag.String("listen", "127.0.0.1:17001", "UDP listen address")
-	nextID := flag.String("next-id", "", "expected next hop id (empty for exit)")
-	nextAddr := flag.String("next-addr", "", "next hop UDP address")
+	nextID := flag.String("next-id", "", "expected next hop id (fallback when -routes is unset)")
+	nextAddrFlag := flag.String("next-addr", "", "next hop UDP address (fallback when -routes is unset)")
+	routesPath := flag.String("routes", "", "JSON file mapping next-hop node IDs to UDP addresses; when set it is authoritative")
 	destAddr := flag.String("dest", "", "destination UDP address (exit only)")
 	frameSize := flag.Int("frame", 1024, "fixed wire frame size")
 	tagTTL := flag.Duration("tag-ttl", 5*time.Minute, "idle timeout for circuit tags")
@@ -117,9 +125,9 @@ func main() {
 	}
 	defer conn.Close()
 
-	var next *net.UDPAddr
-	if *nextAddr != "" {
-		next, err = net.ResolveUDPAddr("udp", *nextAddr)
+	var nextAddr *net.UDPAddr
+	if *nextAddrFlag != "" {
+		nextAddr, err = net.ResolveUDPAddr("udp", *nextAddrFlag)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -131,6 +139,15 @@ func main() {
 			log.Fatal(err)
 		}
 	}
+	var routes map[string]*net.UDPAddr
+	if *routesPath != "" {
+		routes, err = loadRoutes(*routesPath)
+		if err != nil {
+			log.Fatalf("routes: %v", err)
+		}
+		log.Printf("relay %s: loaded %d routes from %s", *id, len(routes), *routesPath)
+	}
+	rt := &router{routes: routes, nextID: *nextID, nextAddr: nextAddr}
 	isExit := dest != nil
 
 	receiptPriv := identityPriv
@@ -231,13 +248,14 @@ func main() {
 				}
 				continue
 			}
-			if len(key) != 32 {
-				log.Printf("handshake key len=%d", len(key))
+			hop, sessionKey, err := splitHopKey(key, model.NodeID(*nextID))
+			if err != nil {
+				log.Printf("handshake: %v", err)
 				continue
 			}
-			keys.set(tag, key)
-			if next == nil {
-				log.Printf("handshake with no next")
+			keys.set(tag, sessionKey)
+			nextHopAddr, ok := rt.resolve(hop)
+			if !ok {
 				continue
 			}
 			out, err := frame.Encode(rest, *frameSize, frame.TypeHandshake, st.OutTag, 0)
@@ -245,7 +263,7 @@ func main() {
 				log.Printf("handshake encode: %v", err)
 				continue
 			}
-			if _, err := conn.WriteToUDP(out, next); err != nil {
+			if _, err := conn.WriteToUDP(out, nextHopAddr); err != nil {
 				log.Printf("handshake forward: %v", err)
 			}
 			continue
@@ -326,12 +344,8 @@ func main() {
 			continue
 		}
 
-		if next == nil {
-			log.Printf("no -next-addr configured")
-			continue
-		}
-		if *nextID != "" && string(nextHop) != *nextID {
-			log.Printf("next hop mismatch: got %s want %s", nextHop, *nextID)
+		next, ok := rt.resolve(nextHop)
+		if !ok {
 			continue
 		}
 		out, err := frame.Encode(inner2, *frameSize, frame.TypeForward, st.OutTag, seq)
@@ -344,5 +358,81 @@ func main() {
 			continue
 		}
 		bytesOut.Add(uint64(len(out)))
+	}
+}
+
+// router resolves a next-hop node ID to a UDP address. A loaded routes file is
+// authoritative: unknown IDs are dropped. Without one, the legacy
+// -next-id/-next-addr pair is used.
+type router struct {
+	routes   map[string]*net.UDPAddr
+	nextID   string
+	nextAddr *net.UDPAddr
+}
+
+func (r *router) resolve(hop model.NodeID) (*net.UDPAddr, bool) {
+	if r.routes != nil {
+		addr, ok := r.routes[string(hop)]
+		if !ok {
+			log.Printf("no route for next hop %q, dropping", hop)
+			return nil, false
+		}
+		return addr, true
+	}
+	if r.nextID != "" && string(hop) != r.nextID {
+		log.Printf("next hop mismatch: got %s want %s", hop, r.nextID)
+		return nil, false
+	}
+	if r.nextAddr == nil {
+		log.Printf("no route or -next-addr for next hop %q, dropping", hop)
+		return nil, false
+	}
+	return r.nextAddr, true
+}
+
+// loadRoutes reads a JSON object mapping node ID to UDP address.
+func loadRoutes(path string) (map[string]*net.UDPAddr, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]string
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	out := make(map[string]*net.UDPAddr, len(raw))
+	for node, addr := range raw {
+		if strings.TrimSpace(node) == "" || strings.TrimSpace(addr) == "" {
+			return nil, fmt.Errorf("%s: empty id or address", path)
+		}
+		a, err := net.ResolveUDPAddr("udp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("%s: route %s: %w", path, node, err)
+		}
+		out[node] = a
+	}
+	return out, nil
+}
+
+// splitHopKey decodes the sealed handshake message of a non-exit relay.
+// Current clients seal nextHopID(16) || sessionKey(32); older clients sealed
+// only sessionKey(32), in which case the configured -next-id is the hop.
+func splitHopKey(msg []byte, fallback model.NodeID) (model.NodeID, []byte, error) {
+	switch len(msg) {
+	case 32:
+		return fallback, msg, nil
+	case hopFieldSize + 32:
+		raw := msg[:hopFieldSize]
+		n := 0
+		for n < len(raw) && raw[n] != 0 {
+			n++
+		}
+		hop := model.NodeID(raw[:n])
+		if hop == "" {
+			return "", nil, fmt.Errorf("empty next hop in handshake")
+		}
+		return hop, msg[hopFieldSize:], nil
+	default:
+		return "", nil, fmt.Errorf("unexpected handshake key length %d", len(msg))
 	}
 }

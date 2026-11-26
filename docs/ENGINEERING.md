@@ -107,6 +107,8 @@
 
 - 每层：16 B next-hop + 12 B nonce + ciphertext + 16 B tag。
 - 每跳只解一层，只知道下一跳；出口才知道 `dest`。
+- 真传输的电路由 `cmd/controller` 从注册表随机分配；relay 用 `-routes` 按
+  下一跳 ID 查地址，不再写死 next。
 - 会话密钥通过 X25519 握手建立：client 为每跳生成 32 B 会话密钥，
   用 relay 的静态 X25519 公钥 seal，沿链逐跳安装；不再用命令行预共享密钥。
 - relay 写签名身份文档（`-identity-out`）：Ed25519 身份签 X25519 公钥；

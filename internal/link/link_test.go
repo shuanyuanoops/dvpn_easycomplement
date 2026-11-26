@@ -29,7 +29,7 @@ func TestTamperFails(t *testing.T) {
 	r := Sign("s1", "entry", "middle", 10, 9, 1000, 900, senderPriv, receiverPriv)
 	r.SentBytes++
 	if r.Verify(senderPub, receiverPub) {
-		t.Fatal("tampered receipt must fail")
+		t.Fatal("tampered sent half must fail")
 	}
 }
 
@@ -55,5 +55,15 @@ func TestChallenge(t *testing.T) {
 	}
 	if NewChallenge("s1", 3, 999).Check(hashes) {
 		t.Fatal("wrong byte count must fail")
+	}
+}
+
+func TestReceiverHalfTamper(t *testing.T) {
+	senderPub, senderPriv := pair(t)
+	receiverPub, receiverPriv := pair(t)
+	r := Sign("s1", "entry", "middle", 10, 9, 1000, 900, senderPriv, receiverPriv)
+	r.RecvBytes++
+	if r.Verify(senderPub, receiverPub) {
+		t.Fatal("tampered recv half must fail")
 	}
 }

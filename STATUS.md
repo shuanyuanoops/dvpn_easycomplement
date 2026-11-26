@@ -21,6 +21,7 @@
 | v0.14 | seq 防重放、握手 ACK、反向加密、身份绑定、sent/recv 双签 | `internal/identity`、`TestExpiry` |
 | v0.15 | 链上 cap/leaf 验签/nonce/唯一 epoch/争议窗口；bursty loss + CI；PRIVACY.md | `internal/chain`、`cmd/bench` |
 | v0.15.1 | nonce 强制；Seal 原子回滚 | `TestSealAtomicOnBadNonce` |
+| v0.16 | 注册表 + controller 随机选路、routes 路由表、2×2×2 集群脚本 | `internal/registry`、`run_cluster.sh` |
 
 全量：`go test ./...` 通过。
 
@@ -41,7 +42,7 @@ go run ./cmd/chain` → `results/bench.csv`。
 
 ## 已知限制
 
-- 真传输 demo 只有 3 个 relay，是“一条电路”的演示；网络级随机选路在仿真里。
+- 集群 demo 有 2 个 entry / 2 个 middle / 2 个 exit，controller 随机分配；controller 只监听本地、无鉴权。
 - 真传输有身份绑定/ACK/反向加密/seq；交叉签/挑战仍只在仿真里。
 - 挑战只能抓“没转发”，抓不到“转了却多报字节”；后者靠交叉签字节比对。
 - tag 表没有 idle 过期。

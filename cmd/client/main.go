@@ -6,10 +6,13 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -20,11 +23,43 @@ import (
 	"dvpn-sim/internal/model"
 	"dvpn-sim/internal/onion"
 	"dvpn-sim/internal/receipt"
+	"dvpn-sim/internal/registry"
 )
 
+// hopFieldSize is the width of a node id in an onion next-hop field.
+const hopFieldSize = 16
+
+// assignment mirrors the controller's GET /assign response.
+type assignment struct {
+	Entry  registry.Relay `json:"entry"`
+	Middle registry.Relay `json:"middle"`
+	Exit   registry.Relay `json:"exit"`
+}
+
+// fetchAssignment asks the controller for a random entry/middle/exit triple.
+func fetchAssignment(base string) (assignment, error) {
+	url := strings.TrimRight(base, "/") + "/assign"
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return assignment{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return assignment{}, fmt.Errorf("GET %s: %s: %s", url, resp.Status, strings.TrimSpace(string(body)))
+	}
+	var a assignment
+	if err := json.NewDecoder(resp.Body).Decode(&a); err != nil {
+		return assignment{}, fmt.Errorf("decode %s: %w", url, err)
+	}
+	return a, nil
+}
+
 func main() {
-	entry := flag.String("entry", "127.0.0.1:17001", "entry relay UDP address")
-	pathStr := flag.String("path", "entry-0,middle-0,exit-0", "comma-separated hop ids")
+	entry := flag.String("entry", "127.0.0.1:17001", "entry relay UDP address (fallback when -controller is unset)")
+	controller := flag.String("controller", "", "controller base URL; GET /assign replaces -entry/-path/-id-*")
+	pathStr := flag.String("path", "entry-0,middle-0,exit-0", "comma-separated hop ids (fallback when -controller is unset)")
 	pubEntry := flag.String("pub-entry", "", "entry X25519 public key hex")
 	pubMiddle := flag.String("pub-middle", "", "middle X25519 public key hex")
 	pubExit := flag.String("pub-exit", "", "exit X25519 public key hex")
@@ -44,17 +79,49 @@ func main() {
 	flag.Parse()
 
 	ids := strings.Split(*pathStr, ",")
+	entryAddr := *entry
+	idPaths := []string{*idEntry, *idMiddle, *idExit}
+	if *controller != "" {
+		// The controller assignment replaces -entry/-path/-id-*; the old flags
+		// remain as the non-controller fallback.
+		a, err := fetchAssignment(*controller)
+		if err != nil {
+			log.Fatalf("controller: %v", err)
+		}
+		if a.Entry.Role != string(model.RoleEntry) || a.Middle.Role != string(model.RoleMiddle) || a.Exit.Role != string(model.RoleExit) {
+			log.Fatalf("controller: bad roles entry=%q middle=%q exit=%q", a.Entry.Role, a.Middle.Role, a.Exit.Role)
+		}
+		ids = []string{a.Entry.ID, a.Middle.ID, a.Exit.ID}
+		idPaths = []string{a.Entry.Identity, a.Middle.Identity, a.Exit.Identity}
+		entryAddr = a.Entry.Addr
+		if entryAddr == "" {
+			log.Fatal("controller: empty entry address")
+		}
+		for i, p := range idPaths {
+			if p == "" {
+				log.Fatalf("controller: empty identity path %d", i)
+			}
+		}
+		fmt.Printf("controller assigned entry=%s (%s) middle=%s exit=%s\n", a.Entry.ID, a.Entry.Addr, a.Middle.ID, a.Exit.ID)
+	}
 	if len(ids) != 3 {
 		log.Fatal("-path needs exactly 3 ids")
+	}
+	for i, id := range ids {
+		if id == "" {
+			log.Fatalf("hop %d: empty id", i)
+		}
+	}
+	if ids[0] == ids[1] || ids[0] == ids[2] || ids[1] == ids[2] {
+		log.Fatalf("duplicate hop ids: %s", strings.Join(ids, ","))
 	}
 	path := []model.NodeID{model.NodeID(ids[0]), model.NodeID(ids[1]), model.NodeID(ids[2])}
 
 	pubHex := []string{*pubEntry, *pubMiddle, *pubExit}
-	idPaths := []string{*idEntry, *idMiddle, *idExit}
 	if idPaths[0] != "" || idPaths[1] != "" || idPaths[2] != "" {
 		for i, p := range idPaths {
 			if p == "" {
-				log.Fatalf("missing -id path %d", i)
+				log.Fatalf("missing identity path %d", i)
 			}
 			doc, err := identity.Read(p)
 			if err != nil {
@@ -96,10 +163,24 @@ func main() {
 			if _, err := rand.Read(sessionKey); err != nil {
 				log.Fatal(err)
 			}
-			msg := sessionKey
-			if i == 2 {
-				msg = append(append([]byte{}, sessionKey...), replyKey...)
+			var msg []byte
+			if i == len(pubHex)-1 {
+				msg = make([]byte, 0, 3*len(sessionKey))
+				msg = append(msg, sessionKey...)
+				msg = append(msg, replyKey...)
 				msg = append(msg, hsNonce...)
+			} else {
+				// Bind the next hop into the sealed handshake so each relay can
+				// look the address up in routes.json instead of a static
+				// -next-addr. Layout: nextHopID(16) || sessionKey(32).
+				if len(path[i+1]) > hopFieldSize {
+					log.Fatalf("hop id %q longer than %d bytes", path[i+1], hopFieldSize)
+				}
+				msg = make([]byte, 0, hopFieldSize+len(sessionKey))
+				hop := make([]byte, hopFieldSize)
+				copy(hop, path[i+1])
+				msg = append(msg, hop...)
+				msg = append(msg, sessionKey...)
 			}
 			sealed, err := handshake.Seal(pub, msg)
 			if err != nil {
@@ -123,7 +204,7 @@ func main() {
 		}
 	}
 
-	addr, err := net.ResolveUDPAddr("udp", *entry)
+	addr, err := net.ResolveUDPAddr("udp", entryAddr)
 	if err != nil {
 		log.Fatal(err)
 	}

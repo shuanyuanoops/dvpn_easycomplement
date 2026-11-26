@@ -21,9 +21,14 @@ type Receipt struct {
 	ReceiverSig []byte
 }
 
-func message(r *Receipt) []byte {
-	return []byte(fmt.Sprintf("%s|%s|%s|%d|%d|%d|%d",
-		r.Session, r.From, r.To, r.SentPackets, r.RecvPackets, r.SentBytes, r.RecvBytes))
+func senderMessage(r *Receipt) []byte {
+	return []byte(fmt.Sprintf("%s|%s|%s|%d|%d",
+		r.Session, r.From, r.To, r.SentPackets, r.SentBytes))
+}
+
+func receiverMessage(r *Receipt) []byte {
+	return []byte(fmt.Sprintf("%s|%s|%s|%d|%d",
+		r.Session, r.From, r.To, r.RecvPackets, r.RecvBytes))
 }
 
 // Sign creates a link receipt signed by both endpoints.
@@ -37,22 +42,27 @@ func Sign(session, from, to string, sentPackets, recvPackets int, sentBytes, rec
 		SentBytes:   sentBytes,
 		RecvBytes:   recvBytes,
 	}
-	m := message(r)
-	r.SenderSig = ed25519.Sign(senderPriv, m)
-	r.ReceiverSig = ed25519.Sign(receiverPriv, m)
+	r.SenderSig = ed25519.Sign(senderPriv, senderMessage(r))
+	r.ReceiverSig = ed25519.Sign(receiverPriv, receiverMessage(r))
 	return r
 }
 
 // Verify checks both signatures against the endpoints' public keys.
 func (r *Receipt) Verify(senderPub, receiverPub ed25519.PublicKey) bool {
-	m := message(r)
-	return ed25519.Verify(senderPub, m, r.SenderSig) &&
-		ed25519.Verify(receiverPub, m, r.ReceiverSig)
+	return ed25519.Verify(senderPub, senderMessage(r), r.SenderSig) &&
+		ed25519.Verify(receiverPub, receiverMessage(r), r.ReceiverSig)
 }
 
-// Hash returns the canonical hash of a link receipt.
+// Hash binds both signed halves and both signatures.
 func Hash(r *Receipt) [32]byte {
-	return sha256.Sum256(message(r))
+	h := sha256.New()
+	h.Write(senderMessage(r))
+	h.Write(receiverMessage(r))
+	h.Write(r.SenderSig)
+	h.Write(r.ReceiverSig)
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	return out
 }
 
 // PacketHash is the per-packet evidence a relay must hold if it forwarded seq.

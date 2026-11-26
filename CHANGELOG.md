@@ -11,6 +11,25 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.16.0] - 2026-11-26
+
+### Added
+- `internal/registry`: relay pool + random entry/middle/exit assignment.
+- `cmd/controller`: HTTP `/assign` and `/healthz`.
+- Relay `-routes` JSON: forward/handshake next hop is resolved by ID, so a relay
+  can forward to any assigned next hop.
+- Client `-controller`: fetch a random circuit instead of hardcoded relays.
+- `scripts/run_cluster.sh`: 2 entries, 2 middles, 2 exits, random assignment,
+  4000 packets, audit assertions.
+- Non-exit handshake plaintext carries the next-hop ID (16 B) so dynamic routing
+  works; exit keeps session+reply key+nonce.
+- Link receipts now split sender/receiver signatures (each signs its own half).
+
+### Measured
+- Cluster runs: random circuits e.g. entry-1->middle-0->exit-0 and
+  entry-0->middle-1->exit-0; 4000/4000 replies, audit 0.0000% both times.
+- `run_local.sh` regression: 4000/4000, audit clean.
+
 ## [0.15.1] - 2026-11-26
 
 ### Fixed

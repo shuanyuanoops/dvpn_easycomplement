@@ -7,7 +7,8 @@
 ### 真传输（本机 UDP 三跳）
 
 ```bash
-bash scripts/run_local.sh
+bash scripts/run_local.sh       # 固定 3 跳 demo
+bash scripts/run_cluster.sh     # 2x2x2 relay + controller 随机分配
 ```
 
 会启动 `sink ← exit ← middle ← entry ← client`，发送 4000 个 1024 B 帧，
