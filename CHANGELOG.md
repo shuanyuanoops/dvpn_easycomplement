@@ -11,6 +11,22 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.14.0] - 2026-11-26
+
+### Added
+- Frame header now carries an 8-byte sequence; relay rejects duplicate/old seq.
+- X25519 identity documents: Ed25519 identity signs the X25519 key; client
+  verifies before sealing.
+- Handshake ACK: exit returns an encrypted ACK; client retries 3x/300ms.
+- Reply encryption: exit holds a reply key from the handshake; replies are
+  AES-GCM encrypted instead of plaintext.
+- Link receipts now carry separate `Sent*` / `Recv*` counts signed by each side.
+- Tests: frame seq, identity sign/verify/tamper, payload seal/open, link receipt.
+
+### Measured
+- 4000/4000 replies, 0% loss, RTT avg ~130-140 us, audit 0.0000%.
+- Handshake ACK received once per relay; encrypted replies verified by client.
+
 ## [0.13.0] - 2026-11-25
 
 ### Added

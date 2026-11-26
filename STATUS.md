@@ -18,6 +18,7 @@
 | v0.11 | 模拟链：注册/质押/结算/罚没、Ed25519 交易、区块 | `internal/chain` |
 | v0.12 | Merkle root/proof、链上争议验 proof、tag 过期 | `internal/merkle`、`TestExpiry` |
 | v0.13 | 丢包/重复包建模、3σ 容忍判罚 | `TestHonestLossDupNoFalsePositive` |
+| v0.14 | seq 防重放、握手 ACK、反向加密、身份绑定、sent/recv 双签 | `internal/identity`、`TestExpiry` |
 
 全量：`go test ./...` 通过。
 

@@ -19,6 +19,7 @@ import (
 	"dvpn-sim/internal/circuit"
 	"dvpn-sim/internal/frame"
 	"dvpn-sim/internal/handshake"
+	"dvpn-sim/internal/identity"
 	"dvpn-sim/internal/onion"
 	"dvpn-sim/internal/receipt"
 )
@@ -60,6 +61,7 @@ func main() {
 	runID := flag.String("run-id", "test", "run id for receipts")
 	receiptPath := flag.String("receipt", "", "write a signed receipt JSON here on exit")
 	pubkeyOut := flag.String("pubkey-out", "", "write the X25519 public key hex here")
+	identityOut := flag.String("identity-out", "", "write the signed identity document here")
 	keyHex := flag.String("key", "", "optional fixed 32-byte AES key, hex (legacy)")
 	listen := flag.String("listen", "127.0.0.1:17001", "UDP listen address")
 	nextID := flag.String("next-id", "", "expected next hop id (empty for exit)")
@@ -87,6 +89,16 @@ func main() {
 	staticPub, staticPriv, err := handshake.GenerateKeyPair()
 	if err != nil {
 		log.Fatal(err)
+	}
+	identityPub, identityPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if *identityOut != "" {
+		doc := identity.Sign(*id, staticPub, identityPub, identityPriv)
+		if err := identity.Write(*identityOut, doc); err != nil {
+			log.Fatalf("identity-out: %v", err)
+		}
 	}
 	if *pubkeyOut != "" {
 		if err := os.WriteFile(*pubkeyOut, []byte(hex.EncodeToString(staticPub)+"\n"), 0o600); err != nil {
@@ -121,13 +133,21 @@ func main() {
 	}
 	isExit := dest != nil
 
-	_, receiptPriv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		log.Fatal(err)
-	}
+	receiptPriv := identityPriv
 	start := time.Now()
 
 	state := circuit.NewState()
+	var seenMu sync.Mutex
+	seen := map[uint64]uint64{}
+	acceptSeq := func(tag, seq uint64) bool {
+		seenMu.Lock()
+		defer seenMu.Unlock()
+		if last, ok := seen[tag]; ok && seq <= last {
+			return false
+		}
+		seen[tag] = seq
+		return true
+	}
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
@@ -138,6 +158,8 @@ func main() {
 		}
 	}()
 	keys := newKeyStore()
+	replyKeys := newKeyStore()
+	hsNonces := newKeyStore()
 	var packets, bytesIn, bytesOut atomic.Uint64
 	var replyPackets, replyIn, replyOut atomic.Uint64
 	var hsPackets atomic.Uint64
@@ -167,7 +189,7 @@ func main() {
 		if err != nil {
 			return
 		}
-		inner, typ, tag, err := frame.Decode(buf[:n])
+		inner, typ, tag, seq, err := frame.Decode(buf[:n])
 		if err != nil {
 			log.Printf("bad frame: %v", err)
 			continue
@@ -186,15 +208,39 @@ func main() {
 				continue
 			}
 			st := state.Forward(tag, remote, isExit)
-			keys.set(tag, key)
 			if isExit {
+				if len(key) != 72 {
+					log.Printf("exit handshake key len=%d", len(key))
+					continue
+				}
+				keys.set(tag, key[:32])
+				replyKeys.set(tag, key[32:64])
+				hsNonces.set(tag, key[64:72])
+				ack, err := handshake.SealPayload(key[32:64], key[64:72])
+				if err != nil {
+					log.Printf("ack seal: %v", err)
+					continue
+				}
+				out, err := frame.Encode(ack, *frameSize, frame.TypeAck, tag, 0)
+				if err != nil {
+					log.Printf("ack encode: %v", err)
+					continue
+				}
+				if _, err := conn.WriteToUDP(out, st.Prev); err != nil {
+					log.Printf("ack send: %v", err)
+				}
 				continue
 			}
+			if len(key) != 32 {
+				log.Printf("handshake key len=%d", len(key))
+				continue
+			}
+			keys.set(tag, key)
 			if next == nil {
 				log.Printf("handshake with no next")
 				continue
 			}
-			out, err := frame.Encode(rest, *frameSize, frame.TypeHandshake, st.OutTag)
+			out, err := frame.Encode(rest, *frameSize, frame.TypeHandshake, st.OutTag, 0)
 			if err != nil {
 				log.Printf("handshake encode: %v", err)
 				continue
@@ -205,7 +251,7 @@ func main() {
 			continue
 		}
 
-		if typ == frame.TypeReply {
+		if typ == frame.TypeReply || typ == frame.TypeAck {
 			replyPackets.Add(1)
 			replyIn.Add(uint64(n))
 			peer, outTag, ok := state.ReplyPeer(tag, isExit)
@@ -213,7 +259,7 @@ func main() {
 				log.Printf("reply for unknown tag %d", tag)
 				continue
 			}
-			out, err := frame.Encode(inner, *frameSize, frame.TypeReply, outTag)
+			out, err := frame.Encode(inner, *frameSize, typ, outTag, 0)
 			if err != nil {
 				log.Printf("encode reply: %v", err)
 				continue
@@ -226,6 +272,10 @@ func main() {
 			continue
 		}
 
+		if !acceptSeq(tag, seq) {
+			log.Printf("replay/old seq tag=%d seq=%d", tag, seq)
+			continue
+		}
 		packets.Add(1)
 		bytesIn.Add(uint64(n))
 		st := state.Forward(tag, remote, isExit)
@@ -255,7 +305,17 @@ func main() {
 			} else {
 				bytesOut.Add(uint64(len(inner2)))
 			}
-			out, err := frame.Encode(inner2, *frameSize, frame.TypeReply, tag)
+			replyKey := replyKeys.get(tag)
+			if replyKey == nil {
+				log.Printf("no reply key for tag %d", tag)
+				continue
+			}
+			enc, err := handshake.SealPayload(replyKey, inner2)
+			if err != nil {
+				log.Printf("reply seal: %v", err)
+				continue
+			}
+			out, err := frame.Encode(enc, *frameSize, frame.TypeReply, tag, 0)
 			if err == nil {
 				if _, err := conn.WriteToUDP(out, st.Prev); err != nil {
 					log.Printf("write reply: %v", err)
@@ -274,7 +334,7 @@ func main() {
 			log.Printf("next hop mismatch: got %s want %s", nextHop, *nextID)
 			continue
 		}
-		out, err := frame.Encode(inner2, *frameSize, frame.TypeForward, st.OutTag)
+		out, err := frame.Encode(inner2, *frameSize, frame.TypeForward, st.OutTag, seq)
 		if err != nil {
 			log.Printf("encode: %v", err)
 			continue

@@ -17,7 +17,7 @@ func pair(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 func TestSignVerify(t *testing.T) {
 	senderPub, senderPriv := pair(t)
 	receiverPub, receiverPriv := pair(t)
-	r := Sign("s1", "entry", "middle", 1, 10, 1000, senderPriv, receiverPriv)
+	r := Sign("s1", "entry", "middle", 10, 9, 1000, 900, senderPriv, receiverPriv)
 	if !r.Verify(senderPub, receiverPub) {
 		t.Fatal("honest link receipt must verify")
 	}
@@ -26,8 +26,8 @@ func TestSignVerify(t *testing.T) {
 func TestTamperFails(t *testing.T) {
 	senderPub, senderPriv := pair(t)
 	receiverPub, receiverPriv := pair(t)
-	r := Sign("s1", "entry", "middle", 1, 10, 1000, senderPriv, receiverPriv)
-	r.PayloadBytes++
+	r := Sign("s1", "entry", "middle", 10, 9, 1000, 900, senderPriv, receiverPriv)
+	r.SentBytes++
 	if r.Verify(senderPub, receiverPub) {
 		t.Fatal("tampered receipt must fail")
 	}
@@ -37,7 +37,7 @@ func TestWrongKeyFails(t *testing.T) {
 	_, senderPriv := pair(t)
 	_, receiverPriv := pair(t)
 	otherPub, _ := pair(t)
-	r := Sign("s1", "entry", "middle", 1, 10, 1000, senderPriv, receiverPriv)
+	r := Sign("s1", "entry", "middle", 10, 9, 1000, 900, senderPriv, receiverPriv)
 	if r.Verify(otherPub, otherPub) {
 		t.Fatal("wrong keys must fail")
 	}

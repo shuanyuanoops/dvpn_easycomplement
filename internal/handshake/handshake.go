@@ -66,6 +66,42 @@ func Seal(recipientPub, msg []byte) ([]byte, error) {
 	return out, nil
 }
 
+// SealPayload encrypts msg with a raw 32-byte key (nonce||ciphertext).
+func SealPayload(key, msg []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, NonceSize)
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, NonceSize+len(msg)+gcm.Overhead())
+	out = append(out, nonce...)
+	out = gcm.Seal(out, nonce, msg, nil)
+	return out, nil
+}
+
+// OpenPayload decrypts a SealPayload box.
+func OpenPayload(key, sealed []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	if len(sealed) < gcm.NonceSize()+gcm.Overhead() {
+		return nil, errors.New("sealed payload too short")
+	}
+	return gcm.Open(nil, sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():], nil)
+}
+
 // Open decrypts a sealed box with the X25519 private key.
 func Open(priv, sealed []byte) ([]byte, error) {
 	if len(sealed) < Overhead {

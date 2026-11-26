@@ -109,8 +109,11 @@
 - 每跳只解一层，只知道下一跳；出口才知道 `dest`。
 - 会话密钥通过 X25519 握手建立：client 为每跳生成 32 B 会话密钥，
   用 relay 的静态 X25519 公钥 seal，沿链逐跳安装；不再用命令行预共享密钥。
-- relay 在 `-pubkey-out` 写静态公钥；client 用 `-pub-*` 读取。
-- handshake 帧的 tag 也按 per-hop 重写；数据帧用同一 tag 查会话密钥。
+- relay 写签名身份文档（`-identity-out`）：Ed25519 身份签 X25519 公钥；
+  client 用 `-id-*` 读取并验签。仍有 TOFU 问题，正式部署要接 registry。
+- exit 的 sealed key 额外带 32 B reply key + 8 B nonce；exit 回 ACK，
+  client 300 ms 超时重试 3 次。reply 用 reply key 做 AES-GCM，不再明文。
+- 帧头 19 B：`len|type|tag|seq`；relay 按 tag 维护 last seq，拒绝重复/旧包。
 
 ### 4.5 反向路径
 

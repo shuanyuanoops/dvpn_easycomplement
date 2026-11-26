@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/binary"
@@ -15,6 +16,7 @@ import (
 
 	"dvpn-sim/internal/frame"
 	"dvpn-sim/internal/handshake"
+	"dvpn-sim/internal/identity"
 	"dvpn-sim/internal/model"
 	"dvpn-sim/internal/onion"
 	"dvpn-sim/internal/receipt"
@@ -26,12 +28,15 @@ func main() {
 	pubEntry := flag.String("pub-entry", "", "entry X25519 public key hex")
 	pubMiddle := flag.String("pub-middle", "", "middle X25519 public key hex")
 	pubExit := flag.String("pub-exit", "", "exit X25519 public key hex")
+	idEntry := flag.String("id-entry", "", "entry identity document path")
+	idMiddle := flag.String("id-middle", "", "middle identity document path")
+	idExit := flag.String("id-exit", "", "exit identity document path")
 	kEntry := flag.String("k-entry", "", "entry fixed AES key hex (legacy)")
 	kMiddle := flag.String("k-middle", "", "middle fixed AES key hex (legacy)")
 	kExit := flag.String("k-exit", "", "exit fixed AES key hex (legacy)")
 	n := flag.Int("n", 4000, "number of cells to send")
 	rate := flag.Int("rate", 4000, "cells per second")
-	cellSize := flag.Int("cell", 1010, "onion cell size")
+	cellSize := flag.Int("cell", 1004, "onion cell size")
 	frameSize := flag.Int("frame", 1024, "fixed wire frame size")
 	name := flag.String("name", "client", "receipt name")
 	runID := flag.String("run-id", "test", "run id for receipts")
@@ -45,10 +50,37 @@ func main() {
 	path := []model.NodeID{model.NodeID(ids[0]), model.NodeID(ids[1]), model.NodeID(ids[2])}
 
 	pubHex := []string{*pubEntry, *pubMiddle, *pubExit}
+	idPaths := []string{*idEntry, *idMiddle, *idExit}
+	if idPaths[0] != "" || idPaths[1] != "" || idPaths[2] != "" {
+		for i, p := range idPaths {
+			if p == "" {
+				log.Fatalf("missing -id path %d", i)
+			}
+			doc, err := identity.Read(p)
+			if err != nil {
+				log.Fatalf("identity %d: %v", i, err)
+			}
+			x, _, err := doc.Verify()
+			if err != nil {
+				log.Fatalf("identity %d: %v", i, err)
+			}
+			pubHex[i] = hex.EncodeToString(x)
+		}
+	}
 	handshakeMode := pubHex[0] != "" || pubHex[1] != "" || pubHex[2] != ""
 	keys := map[model.NodeID][]byte{}
 	var handshakePayload []byte
-
+	replyKey := make([]byte, 32)
+	hsNonce := make([]byte, 8)
+	ackCh := make(chan struct{}, 1)
+	if handshakeMode {
+		if _, err := rand.Read(replyKey); err != nil {
+			log.Fatal(err)
+		}
+		if _, err := rand.Read(hsNonce); err != nil {
+			log.Fatal(err)
+		}
+	}
 	if handshakeMode {
 		for i, h := range pubHex {
 			if h == "" {
@@ -64,7 +96,12 @@ func main() {
 			if _, err := rand.Read(sessionKey); err != nil {
 				log.Fatal(err)
 			}
-			sealed, err := handshake.Seal(pub, sessionKey)
+			msg := sessionKey
+			if i == 2 {
+				msg = append(append([]byte{}, sessionKey...), replyKey...)
+				msg = append(msg, hsNonce...)
+			}
+			sealed, err := handshake.Seal(pub, msg)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -111,35 +148,61 @@ func main() {
 			if err != nil {
 				return
 			}
-			inner, typ, gotTag, err := frame.Decode(buf[:n])
-			if err != nil || typ != frame.TypeReply || gotTag != tag || len(inner) < 16 {
+			inner, typ, gotTag, _, err := frame.Decode(buf[:n])
+			if err != nil || gotTag != tag {
 				continue
 			}
-			ts := int64(binary.BigEndian.Uint64(inner[:8]))
-			if ts <= 0 {
-				continue
+			switch typ {
+			case frame.TypeAck:
+				plain, err := handshake.OpenPayload(replyKey, inner)
+				if err == nil && bytes.Equal(plain, hsNonce) {
+					select {
+					case ackCh <- struct{}{}:
+					default:
+					}
+				}
+			case frame.TypeReply:
+				plain, err := handshake.OpenPayload(replyKey, inner)
+				if err != nil || len(plain) < 16 {
+					continue
+				}
+				ts := int64(binary.BigEndian.Uint64(plain[:8]))
+				if ts <= 0 {
+					continue
+				}
+				rtt := time.Since(time.Unix(0, ts))
+				if rtt < 0 {
+					rtt = 0
+				}
+				mu.Lock()
+				rtts = append(rtts, rtt)
+				mu.Unlock()
 			}
-			rtt := time.Since(time.Unix(0, ts))
-			if rtt < 0 {
-				rtt = 0
-			}
-			mu.Lock()
-			rtts = append(rtts, rtt)
-			mu.Unlock()
 		}
 	}()
 
 	if handshakeMode {
-		out, err := frame.Encode(handshakePayload, *frameSize, frame.TypeHandshake, tag)
-		if err != nil {
-			log.Fatal(err)
+		acked := false
+		for attempt := 0; attempt < 3 && !acked; attempt++ {
+			out, err := frame.Encode(handshakePayload, *frameSize, frame.TypeHandshake, tag, 0)
+			if err != nil {
+				log.Fatal(err)
+			}
+			if _, err := conn.Write(out); err != nil {
+				log.Fatal(err)
+			}
+			select {
+			case <-ackCh:
+				acked = true
+			case <-time.After(300 * time.Millisecond):
+			}
 		}
-		if _, err := conn.Write(out); err != nil {
-			log.Fatal(err)
+		if !acked {
+			log.Fatal("handshake ack timeout")
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
 
+	var seq uint64
 	payloadSize := onion.Capacity(*cellSize, len(ids))
 	if payloadSize < 16 {
 		log.Fatalf("cell too small: payload=%d", payloadSize)
@@ -170,7 +233,8 @@ func main() {
 			if err != nil {
 				log.Fatal(err)
 			}
-			out, err := frame.Encode(cell, *frameSize, frame.TypeForward, tag)
+			seq++
+			out, err := frame.Encode(cell, *frameSize, frame.TypeForward, tag, seq)
 			if err != nil {
 				log.Fatal(err)
 			}

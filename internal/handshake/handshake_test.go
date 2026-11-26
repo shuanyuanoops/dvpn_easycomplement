@@ -41,3 +41,19 @@ func TestWrongKeyFails(t *testing.T) {
 		t.Fatal("wrong key should fail")
 	}
 }
+
+func TestSealOpenPayload(t *testing.T) {
+	key := bytes.Repeat([]byte{9}, KeySize)
+	msg := []byte("ack-nonce")
+	sealed, err := SealPayload(key, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := OpenPayload(key, sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, msg) {
+		t.Fatal("mismatch")
+	}
+}

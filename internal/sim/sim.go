@@ -536,7 +536,15 @@ func (s *Sim) buildReceipts() {
 			if c == nil {
 				continue
 			}
-			s.linkReceipts = append(s.linkReceipts, dvpnlink.Sign(session, string(from), string(to), 1, c.packets, c.bytes, s.keys[from], s.keys[to]))
+			ct := s.counters[session][to]
+			if ct == nil {
+				ct = &counter{}
+			}
+			s.linkReceipts = append(s.linkReceipts, dvpnlink.Sign(
+				session, string(from), string(to),
+				c.packets, ct.packets, c.bytes, ct.bytes,
+				s.keys[from], s.keys[to]))
+
 		}
 	}
 }
@@ -605,11 +613,8 @@ func (s *Sim) audit() {
 			s.res.LinkFailed++
 			continue
 		}
-		recv := 0.0
-		if c := s.counters[lr.Session][model.NodeID(lr.To)]; c != nil {
-			recv = float64(c.bytes)
-		}
-		sent := float64(lr.PayloadBytes)
+		recv := float64(lr.RecvBytes)
+		sent := float64(lr.SentBytes)
 		capBytes := float64(onion.Capacity(s.cfg.CellSize, 3))
 		pkts := sent / capBytes
 		slack := 0.01*sent + 2*capBytes
