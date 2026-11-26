@@ -11,6 +11,20 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.15.0] - 2026-11-26
+
+### Added
+- Chain: `settle` cap (`Amount`), account public-key binding, optional tx nonce,
+  unique per-node epoch root, `DisputeWindow`, `TxAdvanceEpoch`.
+- Dispute verifies the leaf is a dual-signed `link.Receipt` before the Merkle proof.
+- `docs/PRIVACY.md`: explicit scope downgrade (no TLS/ECH, no real cover/trace).
+- Simulator: bursty loss (`BurstLoss`), latency jitter (`JitterMs`); bench uses
+  5 seeds and reports 95% CI.
+- Tests: settle cap, nonce, dispute window, dual-signed receipt dispute.
+
+### Measured
+- Bench with 5 seeds: latency CI now non-zero; hop/cell/cover trends unchanged.
+
 ## [0.14.0] - 2026-11-26
 
 ### Added

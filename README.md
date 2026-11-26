@@ -73,6 +73,7 @@ internal/sim/      事件循环、链路、计量、审计
 scripts/           run_local.sh
 docs/              ENGINEERING.md（设计文档）
 STATUS.md          当前状态/指标/限制
+docs/PRIVACY.md    隐私声明与边界（明确降级）
 internal/chain/     模拟链（注册/质押/结算/罚没）
 internal/merkle/    收据 Merkle root / proof
 ```

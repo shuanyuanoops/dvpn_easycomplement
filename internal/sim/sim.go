@@ -36,6 +36,8 @@ type Config struct {
 	Epsilon   float64
 	LossRate  float64
 	DupRate   float64
+	BurstLoss int
+	JitterMs  int64
 
 	CheatNode         string
 	CheatFactor       float64
@@ -161,6 +163,7 @@ type Sim struct {
 
 	linkReceipts []*dvpnlink.Receipt
 	hashes       map[string]map[model.NodeID]map[int][32]byte
+	burst        map[string]int
 
 	packetID int
 	res      Results
@@ -213,6 +216,7 @@ func New(cfg Config) *Sim {
 		counters:    map[string]map[model.NodeID]*counter{},
 		receipts:    map[string]map[model.NodeID]*model.Receipt{},
 		hashes:      map[string]map[model.NodeID]map[int][32]byte{},
+		burst:       map[string]int{},
 	}
 	heap.Init(&s.events)
 	s.initNodes()
@@ -398,12 +402,10 @@ func (s *Sim) handleArrive(pkt model.Packet) {
 	s.record(pkt.Session, node, int64(pkt.PayloadSize))
 	s.remember(pkt)
 
-	if s.cfg.LossRate > 0 && s.rng.Float64() < s.cfg.LossRate {
-		s.res.Dropped++
-		return
-	}
-
 	if next == "dest" {
+		if s.dropLink(node, "dest") {
+			return
+		}
 		delay := s.linkDelay(node, "dest", pkt.Size)
 		s.push(2, s.now+delay, pkt)
 		if s.maybeDuplicate(pkt) {
@@ -417,6 +419,9 @@ func (s *Sim) handleArrive(pkt model.Packet) {
 	if pkt.Hop+1 >= len(pkt.Path) || next != pkt.Path[pkt.Hop+1] {
 		panic(fmt.Sprintf("onion next=%s, path next=%v", next, pkt.Path))
 	}
+	if s.dropLink(node, next) {
+		return
+	}
 	pkt.Cell = inner
 	pkt.Hop++
 	delay := s.linkDelay(node, next, pkt.Size)
@@ -427,6 +432,21 @@ func (s *Sim) handleArrive(pkt model.Packet) {
 		s.res.Duplicated++
 		s.push(1, s.now+delay, dup)
 	}
+}
+
+func (s *Sim) dropLink(from, to model.NodeID) bool {
+	key := string(from) + "->" + string(to)
+	if s.burst[key] > 0 {
+		s.burst[key]--
+		s.res.Dropped++
+		return true
+	}
+	if s.cfg.LossRate > 0 && s.rng.Float64() < s.cfg.LossRate {
+		s.burst[key] = s.cfg.BurstLoss
+		s.res.Dropped++
+		return true
+	}
+	return false
 }
 
 func (s *Sim) maybeDuplicate(pkt model.Packet) bool {
@@ -464,7 +484,15 @@ func (s *Sim) linkDelay(from, to model.NodeID, size int) int64 {
 		serial = 1
 	}
 	l.nextFree = start + serial
-	return start + serial + l.latency - s.now
+	delay := start + serial + l.latency - s.now
+	if s.cfg.JitterMs > 0 {
+		j := s.rng.Int63n(2*s.cfg.JitterMs+1) - s.cfg.JitterMs
+		delay += j * 1_000_000
+		if delay < 0 {
+			delay = 0
+		}
+	}
+	return delay
 }
 
 func (s *Sim) record(session string, hop model.NodeID, bytes int64) {

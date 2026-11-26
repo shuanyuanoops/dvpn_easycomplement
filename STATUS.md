@@ -19,6 +19,7 @@
 | v0.12 | Merkle root/proof、链上争议验 proof、tag 过期 | `internal/merkle`、`TestExpiry` |
 | v0.13 | 丢包/重复包建模、3σ 容忍判罚 | `TestHonestLossDupNoFalsePositive` |
 | v0.14 | seq 防重放、握手 ACK、反向加密、身份绑定、sent/recv 双签 | `internal/identity`、`TestExpiry` |
+| v0.15 | 链上 cap/leaf 验签/nonce/唯一 epoch/争议窗口；bursty loss + CI；PRIVACY.md | `internal/chain`、`cmd/bench` |
 
 全量：`go test ./...` 通过。
 
@@ -40,7 +41,7 @@ go run ./cmd/chain` → `results/bench.csv`。
 ## 已知限制
 
 - 真传输 demo 只有 3 个 relay，是“一条电路”的演示；网络级随机选路在仿真里。
-- 真传输还没接交叉签/挑战（只在仿真里）。
+- 真传输有身份绑定/ACK/反向加密/seq；交叉签/挑战仍只在仿真里。
 - 挑战只能抓“没转发”，抓不到“转了却多报字节”；后者靠交叉签字节比对。
 - tag 表没有 idle 过期。
 - cover 是合成观测，不是真实 cover 流量。

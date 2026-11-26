@@ -3,11 +3,11 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
 	"fmt"
 	"log"
 
 	"dvpn-sim/internal/chain"
+	"dvpn-sim/internal/link"
 	"dvpn-sim/internal/merkle"
 )
 
@@ -59,26 +59,30 @@ func main() {
 	}
 	seal(c)
 
-	// Epoch 1 settlement: bytes measured by the node, with a Merkle root.
-	var leaves [][32]byte
-	for i := 0; i < 4; i++ {
-		leaves = append(leaves, sha256.Sum256([]byte(fmt.Sprintf("receipt-%d", i))))
-	}
-	tree := merkle.Build(leaves)
+	// Epoch 1 settlement: one dual-signed link receipt as the leaf.
+	linkSenderPub, linkSenderPriv := key()
+	linkReceiverPub, linkReceiverPriv := key()
+	lr := link.Sign("s1", "middle", "exit", 10, 9, 600, 540, linkSenderPriv, linkReceiverPriv)
+	leaf := link.Hash(lr)
+	tree := merkle.Build([][32]byte{leaf})
 	root := tree.Root()
-	proof, err := tree.Proof(2)
+	proof, err := tree.Proof(0)
 	if err != nil {
 		log.Fatal(err)
 	}
-	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "entry", Bytes: 1000, Epoch: 1, Root: root}, client))
-	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "middle", Bytes: 800, Epoch: 1, Root: root}, client))
-	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "exit", Bytes: 600, Epoch: 1, Root: root}, client))
+	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "entry", Bytes: 1000, Epoch: 1, Root: root, Amount: 1000}, client))
+	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "middle", Bytes: 800, Epoch: 1, Root: root, Amount: 800}, client))
+	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "exit", Bytes: 600, Epoch: 1, Root: root, Amount: 600}, client))
 	seal(c)
 
-	// Dispute the exit for 400, with a Merkle proof of receipt-2.
+	// Dispute the exit for 400, with the dual-signed link receipt and Merkle proof.
 	submit(c, chain.Sign(chain.Tx{
 		Type: chain.TxDispute, From: "client", Node: "exit", Amount: 400, Epoch: 1,
-		Index: 2, Leaf: leaves[2], Proof: proof,
+		Index: 0, Leaf: leaf, Proof: proof,
+		LinkSession: "s1", LinkFrom: "middle", LinkTo: "exit",
+		SentPackets: 10, RecvPackets: 9, SentBytes: 600, RecvBytes: 540,
+		SenderPub: linkSenderPub, ReceiverPub: linkReceiverPub,
+		SenderSig: lr.SenderSig, ReceiverSig: lr.ReceiverSig,
 	}, client))
 	seal(c)
 
