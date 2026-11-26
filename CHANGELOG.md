@@ -11,6 +11,23 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.20.0] - 2026-11-26
+
+### Added
+- TLS 1.3 ingress gateway (`cmd/tlsgate`): client --TLS--> gate --UDP--> entry;
+  fixed 1024-byte frames are carried over a TLS stream.
+- `internal/transport`: UDP/TLS framed transport; client `-tls`, `-tls-gate`,
+  `-tls-name`, `-tls-insecure`.
+- `internal/ech`: X25519/HKDF-SHA256/AES-128-GCM ECHConfig generator.
+- Gate `-ech -ech-out`: server ECH key + client ECHConfigList; client
+  `-ech-config`.
+- Scripts: `run_tls.sh` and `run_tls_ech.sh`.
+
+### Measured
+- TLS 1.3 (`version=0x304`), `ech=true`, 4000/4000 replies, audit 0.0000%.
+- `run_cluster.sh`: `linkaudit links=2 ok=2 failed=0 challenges=6 ok=6`.
+- `run_tun_lab.sh`: HTTP through client TUN -> onion -> exit TUN.
+
 ## [0.19.0] - 2026-11-26
 
 ### Added

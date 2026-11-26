@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,6 +26,7 @@ import (
 	"dvpn-sim/internal/onion"
 	"dvpn-sim/internal/receipt"
 	"dvpn-sim/internal/registry"
+	"dvpn-sim/internal/transport"
 	"dvpn-sim/internal/tun"
 )
 
@@ -84,6 +84,11 @@ func main() {
 	tunName := flag.String("tun-name", "dvpn0", "TUN device name")
 	tunMTU := flag.Int("tun-mtu", 800, "TUN MTU (must fit the onion payload)")
 	tunIP := flag.String("tun-ip", "10.99.0.2/24", "TUN address (CIDR)")
+	tlsMode := flag.Bool("tls", false, "connect to the entry through a TLS 1.3 gateway")
+	tlsGate := flag.String("tls-gate", "127.0.0.1:17443", "TLS gateway address")
+	tlsName := flag.String("tls-name", "dvpn.local", "TLS server name")
+	tlsInsecure := flag.Bool("tls-insecure", true, "skip TLS certificate verification (demo)")
+	echConfigPath := flag.String("ech-config", "", "ECHConfigList file for TLS ECH")
 	flag.Parse()
 
 	ids := strings.Split(*pathStr, ",")
@@ -212,11 +217,20 @@ func main() {
 		}
 	}
 
-	addr, err := net.ResolveUDPAddr("udp", entryAddr)
-	if err != nil {
-		log.Fatal(err)
+	var err error
+	var conn transport.FrameConn
+	if *tlsMode {
+		var echConfig []byte
+		if *echConfigPath != "" {
+			echConfig, err = os.ReadFile(*echConfigPath)
+			if err != nil {
+				log.Fatalf("ech config: %v", err)
+			}
+		}
+		conn, err = transport.DialTLSECH(*tlsGate, *tlsName, *tlsInsecure, *frameSize, echConfig)
+	} else {
+		conn, err = transport.DialUDP(entryAddr, *frameSize)
 	}
-	conn, err := net.DialUDP("udp", nil, addr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -244,13 +258,12 @@ func main() {
 	var mu sync.Mutex
 	var rtts []time.Duration
 	go func() {
-		buf := make([]byte, 4096)
 		for {
-			n, err := conn.Read(buf)
+			frameBytes, err := conn.ReadFrame()
 			if err != nil {
 				return
 			}
-			inner, typ, gotTag, _, err := frame.Decode(buf[:n])
+			inner, typ, gotTag, _, err := frame.Decode(frameBytes)
 			if err != nil || gotTag != tag {
 				continue
 			}
@@ -299,7 +312,7 @@ func main() {
 			if err != nil {
 				log.Fatal(err)
 			}
-			if _, err := conn.Write(out); err != nil {
+			if err := conn.WriteFrame(out); err != nil {
 				log.Fatal(err)
 			}
 			select {
@@ -367,8 +380,8 @@ func main() {
 				log.Printf("frame encode: %v", err)
 				continue
 			}
-			if _, err := conn.Write(out); err != nil {
-				log.Printf("udp write: %v", err)
+			if err := conn.WriteFrame(out); err != nil {
+				log.Printf("write: %v", err)
 				break
 			}
 			wireBytes += int64(len(out))
@@ -389,7 +402,7 @@ func main() {
 				if err != nil {
 					log.Fatal(err)
 				}
-				if _, err := conn.Write(out); err != nil {
+				if err := conn.WriteFrame(out); err != nil {
 					log.Fatal(err)
 				}
 				wireBytes += int64(len(out))

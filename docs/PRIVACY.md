@@ -12,11 +12,13 @@
 
 ## 真实传输不能提供什么
 
-- **没有 TLS，也没有 ECH**：当前 payload 是裸 UDP 转发，不存在 SNI。
+- 入口到 entry 已有 TLS 1.3 网关，支持 ECH；但证书是自签、client 默认跳过校验，
+  这是 demo，不是 PKI/REALITY。
 - **不隐藏目标 IP**：exit 必须知道目标才能转发。
 - **不抗 E+X 合谋**：entry 和 exit 交换时间/字节即可关联。
 - **不抗全局观察者/流量分析**：没有 cover traffic、batching、padding 策略。
 - **身份是 TOFU**：client 从文件读 Ed25519 公钥，没有 registry/CA 固定。
+- TLS 网关只保护 client→entry 这一段；middle/exit 之间仍是 UDP 洋葱帧。
 
 ## 仿真里的隐私指标
 

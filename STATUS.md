@@ -25,6 +25,7 @@
 | v0.17 | TUN 设备 + client/exit TUN 模式 | `internal/tun`、`TestOpenTUN` |
 | v0.18 | TUN 端到端数据面（client TUN → 洋葱 → exit TUN → HTTP） | `scripts/run_tun_lab.sh` |
 | v0.19 | 真传输逐链路双签 + 挑战 | `cmd/linkaudit`、`run_cluster.sh` |
+| v0.20 | TLS 1.3 + ECH 入口伪装 | `cmd/tlsgate`、`run_tls_ech.sh` |
 
 全量：`go test ./...` 通过。
 
