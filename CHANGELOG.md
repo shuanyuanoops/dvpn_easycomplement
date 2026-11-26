@@ -11,6 +11,20 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.15.1] - 2026-11-26
+
+### Fixed
+- Chain transactions now require a per-account nonce (`account.Nonce+1`); replay
+  or duplicate nonce is rejected.
+- `Seal` is atomic: it applies txs to a deep snapshot and commits only if every
+  tx succeeds. A failed block leaves balances, nonces, stakes, settlements,
+  treasury and epoch unchanged; the mempool is retained for retry.
+- Added tests for atomic rollback (balances/nonces/settlements) and nonce replay.
+
+### Limits
+- On failure the bad tx remains in the mempool; the caller must remove/replace it.
+- Each block deep-copies chain state; fine for the simulator, not production scale.
+
 ## [0.15.0] - 2026-11-26
 
 ### Added

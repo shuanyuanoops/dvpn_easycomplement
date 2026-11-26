@@ -139,19 +139,65 @@ func (c *Chain) Submit(tx Tx) error {
 func (c *Chain) Seal() (Block, error) {
 	prev := c.Blocks[len(c.Blocks)-1]
 	b := Block{Height: prev.Height + 1, Prev: prev.Hash, Txs: c.Mempool}
+	// Apply the block tentatively on a deep copy so a failing tx cannot leave
+	// partially applied balances, nonces, stakes or settlements behind.
+	next := c.snapshot()
 	for _, tx := range b.Txs {
-		if err := c.apply(tx); err != nil {
+		if err := next.apply(tx); err != nil {
 			return Block{}, fmt.Errorf("tx %s: %w", tx.Type, err)
 		}
 	}
 	b.Hash = blockHash(b)
-	c.Blocks = append(c.Blocks, b)
-	c.Mempool = nil
+	next.Blocks = append(next.Blocks, b)
+	next.Mempool = nil
+	// Commit only after every tx applied successfully. The mempool of c is left
+	// untouched on failure so the caller can retry with a corrected block.
+	*c = *next
 	return b, nil
+}
+
+// snapshot deep-copies the mutable chain state (nodes, accounts, settlements,
+// blocks and mempool) so a block can be applied and discarded atomically. Tx
+// values inside Block are never mutated by apply, so sharing those slices
+// between snapshots is safe.
+func (c *Chain) snapshot() *Chain {
+	s := &Chain{
+		Nodes:         make(map[string]*Node, len(c.Nodes)),
+		Accounts:      make(map[string]*Account, len(c.Accounts)),
+		Blocks:        append([]Block(nil), c.Blocks...),
+		Mempool:       append([]Tx(nil), c.Mempool...),
+		Treasury:      c.Treasury,
+		Settlements:   make(map[string]map[int64][32]byte, len(c.Settlements)),
+		CurrentEpoch:  c.CurrentEpoch,
+		DisputeWindow: c.DisputeWindow,
+	}
+	for id, n := range c.Nodes {
+		cp := *n
+		cp.PubKey = append([]byte(nil), n.PubKey...)
+		s.Nodes[id] = &cp
+	}
+	for id, a := range c.Accounts {
+		cp := *a
+		cp.PubKey = append([]byte(nil), a.PubKey...)
+		s.Accounts[id] = &cp
+	}
+	for node, roots := range c.Settlements {
+		cp := make(map[int64][32]byte, len(roots))
+		for epoch, root := range roots {
+			cp[epoch] = root
+		}
+		s.Settlements[node] = cp
+	}
+	return s
 }
 
 func (c *Chain) apply(tx Tx) error {
 	acc := c.account(tx.From)
+	// Every tx must carry a nonce matching the sender's current nonce + 1.
+	// The first tx of an account (a deposit) therefore uses nonce 1.
+	if tx.Nonce != acc.Nonce+1 {
+		return errors.New("bad nonce")
+	}
 	if len(acc.PubKey) == 0 {
 		if tx.Type != TxDeposit {
 			return errors.New("account must deposit first")
@@ -160,12 +206,7 @@ func (c *Chain) apply(tx Tx) error {
 	} else if !bytes.Equal(acc.PubKey, tx.PubKey) {
 		return errors.New("account key mismatch")
 	}
-	if tx.Nonce > 0 {
-		if tx.Nonce != acc.Nonce+1 {
-			return errors.New("bad nonce")
-		}
-		acc.Nonce = tx.Nonce
-	}
+	acc.Nonce = tx.Nonce
 
 	switch tx.Type {
 	case TxDeposit:

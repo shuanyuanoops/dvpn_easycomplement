@@ -20,6 +20,7 @@
 | v0.13 | 丢包/重复包建模、3σ 容忍判罚 | `TestHonestLossDupNoFalsePositive` |
 | v0.14 | seq 防重放、握手 ACK、反向加密、身份绑定、sent/recv 双签 | `internal/identity`、`TestExpiry` |
 | v0.15 | 链上 cap/leaf 验签/nonce/唯一 epoch/争议窗口；bursty loss + CI；PRIVACY.md | `internal/chain`、`cmd/bench` |
+| v0.15.1 | nonce 强制；Seal 原子回滚 | `TestSealAtomicOnBadNonce` |
 
 全量：`go test ./...` 通过。
 

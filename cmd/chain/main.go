@@ -33,18 +33,28 @@ func seal(c *chain.Chain) chain.Block {
 	return b
 }
 
+// nonces hands out the next nonce for each sender account. Every tx must use
+// exactly the account's current nonce + 1; the first tx of an account uses 1.
+type nonces map[string]uint64
+
+func (n nonces) next(from string) uint64 {
+	n[from]++
+	return n[from]
+}
+
 func main() {
 	c := chain.New()
 	_, client := key()
 	_, entry := key()
 	_, middle := key()
 	_, exit := key()
+	nonce := nonces{}
 
 	// Fund accounts.
-	submit(c, chain.Sign(chain.Tx{Type: chain.TxDeposit, From: "client", Amount: 10000}, client))
+	submit(c, chain.Sign(chain.Tx{Type: chain.TxDeposit, From: "client", Amount: 10000, Nonce: nonce.next("client")}, client))
 	for _, n := range []string{"entry", "middle", "exit"} {
 		priv := map[string]ed25519.PrivateKey{"entry": entry, "middle": middle, "exit": exit}[n]
-		submit(c, chain.Sign(chain.Tx{Type: chain.TxDeposit, From: n, Amount: 1000}, priv))
+		submit(c, chain.Sign(chain.Tx{Type: chain.TxDeposit, From: n, Amount: 1000, Nonce: nonce.next(n)}, priv))
 	}
 	seal(c)
 
@@ -54,7 +64,7 @@ func main() {
 		submit(c, chain.Sign(chain.Tx{
 			Type: chain.TxRegisterNode, From: n, Node: n,
 			Amount: 1000, Price: 1,
-			Endpoint: "127.0.0.1:1700" + n[:1], Region: "r1",
+			Endpoint: "127.0.0.1:1700" + n[:1], Region: "r1", Nonce: nonce.next(n),
 		}, priv))
 	}
 	seal(c)
@@ -70,14 +80,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "entry", Bytes: 1000, Epoch: 1, Root: root, Amount: 1000}, client))
-	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "middle", Bytes: 800, Epoch: 1, Root: root, Amount: 800}, client))
-	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "exit", Bytes: 600, Epoch: 1, Root: root, Amount: 600}, client))
+	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "entry", Bytes: 1000, Epoch: 1, Root: root, Amount: 1000, Nonce: nonce.next("client")}, client))
+	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "middle", Bytes: 800, Epoch: 1, Root: root, Amount: 800, Nonce: nonce.next("client")}, client))
+	submit(c, chain.Sign(chain.Tx{Type: chain.TxSettle, From: "client", Node: "exit", Bytes: 600, Epoch: 1, Root: root, Amount: 600, Nonce: nonce.next("client")}, client))
 	seal(c)
 
 	// Dispute the exit for 400, with the dual-signed link receipt and Merkle proof.
 	submit(c, chain.Sign(chain.Tx{
-		Type: chain.TxDispute, From: "client", Node: "exit", Amount: 400, Epoch: 1,
+		Type: chain.TxDispute, From: "client", Node: "exit", Amount: 400, Epoch: 1, Nonce: nonce.next("client"),
 		Index: 0, Leaf: leaf, Proof: proof,
 		LinkSession: "s1", LinkFrom: "middle", LinkTo: "exit",
 		SentPackets: 10, RecvPackets: 9, SentBytes: 600, RecvBytes: 540,
@@ -93,7 +103,7 @@ func main() {
 	fmt.Println("=== accounts ===")
 	for _, id := range []string{"client", "entry", "middle", "exit"} {
 		a := c.Accounts[id]
-		fmt.Printf("%-7s balance=%d locked=%d\n", id, a.Balance, a.Locked)
+		fmt.Printf("%-7s balance=%d locked=%d nonce=%d\n", id, a.Balance, a.Locked, a.Nonce)
 	}
 	fmt.Println("=== nodes ===")
 	for _, id := range []string{"entry", "middle", "exit"} {
