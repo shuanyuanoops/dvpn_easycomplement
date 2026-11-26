@@ -9,6 +9,8 @@
 ```bash
 bash scripts/run_local.sh       # 固定 3 跳 demo
 bash scripts/run_cluster.sh     # 2x2x2 relay + controller 随机分配
+# TUN 模式（需要 root/TUN 权限）：
+#   client -tun -tun-name dvpn0 ... ; exit relay -tun -tun-name dvpn1 ...
 ```
 
 会启动 `sink ← exit ← middle ← entry ← client`，发送 4000 个 1024 B 帧，

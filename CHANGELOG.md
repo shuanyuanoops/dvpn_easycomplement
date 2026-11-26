@@ -11,6 +11,22 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.17.0] - 2026-11-26
+
+### Added
+- `internal/tun`: Linux TUN device (raw IP packets), `Pump`, and an in-memory
+  `Pipe` for tests.
+- Client `-tun`: read IP packets from a TUN device, onion-encapsulate, and write
+  decrypted replies back to TUN.
+- Relay exit `-tun`: write decrypted payloads to a TUN device and return packets
+  read from it through the circuit.
+- `TestOpenTUN` verifies device creation inside `unshare -Urn` (user namespace).
+
+### Limits
+- Full TUN lab (two netns + veth + routes/NAT) still needs root; the sandbox has
+  no root/sudo, so only TUN creation and packet code are tested here.
+- Per-link receipts and TLS/ECH camouflage are next.
+
 ## [0.16.0] - 2026-11-26
 
 ### Added

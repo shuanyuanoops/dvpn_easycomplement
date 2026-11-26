@@ -22,6 +22,7 @@
 | v0.15 | 链上 cap/leaf 验签/nonce/唯一 epoch/争议窗口；bursty loss + CI；PRIVACY.md | `internal/chain`、`cmd/bench` |
 | v0.15.1 | nonce 强制；Seal 原子回滚 | `TestSealAtomicOnBadNonce` |
 | v0.16 | 注册表 + controller 随机选路、routes 路由表、2×2×2 集群脚本 | `internal/registry`、`run_cluster.sh` |
+| v0.17 | TUN 设备 + client/exit TUN 模式 | `internal/tun`、`TestOpenTUN` |
 
 全量：`go test ./...` 通过。
 

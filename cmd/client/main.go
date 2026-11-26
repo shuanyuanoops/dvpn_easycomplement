@@ -13,8 +13,11 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"dvpn-sim/internal/frame"
@@ -24,6 +27,7 @@ import (
 	"dvpn-sim/internal/onion"
 	"dvpn-sim/internal/receipt"
 	"dvpn-sim/internal/registry"
+	"dvpn-sim/internal/tun"
 )
 
 // hopFieldSize is the width of a node id in an onion next-hop field.
@@ -76,6 +80,9 @@ func main() {
 	name := flag.String("name", "client", "receipt name")
 	runID := flag.String("run-id", "test", "run id for receipts")
 	receiptPath := flag.String("receipt", "", "write a signed receipt JSON here")
+	tunMode := flag.Bool("tun", false, "TUN data plane: read/write raw IP packets instead of synthetic payloads")
+	tunName := flag.String("tun-name", "dvpn0", "TUN device name")
+	tunMTU := flag.Int("tun-mtu", 800, "TUN MTU (must fit the onion payload)")
 	flag.Parse()
 
 	ids := strings.Split(*pathStr, ",")
@@ -220,6 +227,16 @@ func main() {
 	}
 	tag := binary.BigEndian.Uint64(cidBuf[:])
 
+	var tunDev *tun.Native
+	if *tunMode {
+		tunDev, err = tun.Open(*tunName)
+		if err != nil {
+			log.Fatalf("tun %s: %v", *tunName, err)
+		}
+		defer tunDev.Close()
+		log.Printf("tun device %s mtu=%d", tunDev.Name(), *tunMTU)
+	}
+
 	var mu sync.Mutex
 	var rtts []time.Duration
 	go func() {
@@ -244,7 +261,16 @@ func main() {
 				}
 			case frame.TypeReply:
 				plain, err := handshake.OpenPayload(replyKey, inner)
-				if err != nil || len(plain) < 16 {
+				if err != nil {
+					continue
+				}
+				if *tunMode {
+					if _, err := tunDev.Write(plain); err != nil {
+						log.Printf("tun write: %v", err)
+					}
+					continue
+				}
+				if len(plain) < 16 {
 					continue
 				}
 				ts := int64(binary.BigEndian.Uint64(plain[:8]))
@@ -305,27 +331,67 @@ func main() {
 	start := time.Now()
 	sent := 0
 	var wireBytes int64
-	for sent < *n {
-		for j := 0; j < perTick && sent < *n; j++ {
-			binary.BigEndian.PutUint64(payload[:8], uint64(time.Now().UnixNano()))
-			binary.BigEndian.PutUint64(payload[8:16], uint64(sent))
-
-			cell, err := onion.Build(path, payload, keys, *cellSize)
+	if *tunMode {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sig
+			tunDev.Close()
+		}()
+		buf := make([]byte, *tunMTU)
+		for {
+			n, err := tunDev.Read(buf)
 			if err != nil {
-				log.Fatal(err)
+				break
+			}
+			if n == 0 {
+				continue
+			}
+			if n > payloadSize {
+				log.Printf("tun packet %d > payload %d, dropping", n, payloadSize)
+				continue
+			}
+			cell, err := onion.Build(path, buf[:n], keys, *cellSize)
+			if err != nil {
+				log.Printf("onion build: %v", err)
+				continue
 			}
 			seq++
 			out, err := frame.Encode(cell, *frameSize, frame.TypeForward, tag, seq)
 			if err != nil {
-				log.Fatal(err)
+				log.Printf("frame encode: %v", err)
+				continue
 			}
 			if _, err := conn.Write(out); err != nil {
-				log.Fatal(err)
+				log.Printf("udp write: %v", err)
+				break
 			}
 			wireBytes += int64(len(out))
 			sent++
 		}
-		<-ticker.C
+	} else {
+		for sent < *n {
+			for j := 0; j < perTick && sent < *n; j++ {
+				binary.BigEndian.PutUint64(payload[:8], uint64(time.Now().UnixNano()))
+				binary.BigEndian.PutUint64(payload[8:16], uint64(sent))
+
+				cell, err := onion.Build(path, payload, keys, *cellSize)
+				if err != nil {
+					log.Fatal(err)
+				}
+				seq++
+				out, err := frame.Encode(cell, *frameSize, frame.TypeForward, tag, seq)
+				if err != nil {
+					log.Fatal(err)
+				}
+				if _, err := conn.Write(out); err != nil {
+					log.Fatal(err)
+				}
+				wireBytes += int64(len(out))
+				sent++
+			}
+			<-ticker.C
+		}
 	}
 
 	time.Sleep(300 * time.Millisecond)
@@ -360,8 +426,13 @@ func main() {
 	if sent > 0 {
 		loss = 100 * float64(sent-len(got)) / float64(sent)
 	}
-	fmt.Printf("client tag=%d handshake=%v sent=%d replies=%d loss=%.2f%% payload=%dB cell=%dB frame=%dB elapsed=%s rate=%.0f pps\n",
-		tag, handshakeMode, sent, len(got), loss, payloadSize, *cellSize, *frameSize, elapsed.Round(time.Millisecond), float64(sent)/elapsed.Seconds())
+	if *tunMode {
+		fmt.Printf("client tag=%d handshake=%v tun=%s sent=%d wire=%dB elapsed=%s\n",
+			tag, handshakeMode, tunDev.Name(), sent, wireBytes, elapsed.Round(time.Millisecond))
+	} else {
+		fmt.Printf("client tag=%d handshake=%v sent=%d replies=%d loss=%.2f%% payload=%dB cell=%dB frame=%dB elapsed=%s rate=%.0f pps\n",
+			tag, handshakeMode, sent, len(got), loss, payloadSize, *cellSize, *frameSize, elapsed.Round(time.Millisecond), float64(sent)/elapsed.Seconds())
+	}
 	fmt.Printf("rtt min=%s avg=%s max=%s\n",
 		minRTT.Round(time.Microsecond), avgRTT.Round(time.Microsecond), maxRTT.Round(time.Microsecond))
 }

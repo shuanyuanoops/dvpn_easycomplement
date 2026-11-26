@@ -25,6 +25,7 @@ import (
 	"dvpn-sim/internal/model"
 	"dvpn-sim/internal/onion"
 	"dvpn-sim/internal/receipt"
+	"dvpn-sim/internal/tun"
 )
 
 // hopFieldSize is the width of a node id in an onion next-hop field and in the
@@ -77,6 +78,9 @@ func main() {
 	destAddr := flag.String("dest", "", "destination UDP address (exit only)")
 	frameSize := flag.Int("frame", 1024, "fixed wire frame size")
 	tagTTL := flag.Duration("tag-ttl", 5*time.Minute, "idle timeout for circuit tags")
+	tunMode := flag.Bool("tun", false, "exit: write payloads to a TUN device and return its packets")
+	tunName := flag.String("tun-name", "dvpn1", "exit TUN device name")
+	tunMTU := flag.Int("tun-mtu", 800, "exit TUN MTU (must fit the onion payload)")
 	flag.Parse()
 
 	if *id == "" {
@@ -148,7 +152,7 @@ func main() {
 		log.Printf("relay %s: loaded %d routes from %s", *id, len(routes), *routesPath)
 	}
 	rt := &router{routes: routes, nextID: *nextID, nextAddr: nextAddr}
-	isExit := dest != nil
+	isExit := *role == "exit" || dest != nil
 
 	receiptPriv := identityPriv
 	start := time.Now()
@@ -177,6 +181,49 @@ func main() {
 	keys := newKeyStore()
 	replyKeys := newKeyStore()
 	hsNonces := newKeyStore()
+
+	var tunDev *tun.Native
+	type tunPeer struct {
+		addr *net.UDPAddr
+		key  []byte
+		tag  uint64
+	}
+	var tunMu sync.Mutex
+	tunPeers := map[uint64]tunPeer{}
+	if *tunMode && isExit {
+		tunDev, err = tun.Open(*tunName)
+		if err != nil {
+			log.Fatalf("tun %s: %v", *tunName, err)
+		}
+		defer tunDev.Close()
+		log.Printf("tun device %s mtu=%d", tunDev.Name(), *tunMTU)
+		go func() {
+			buf := make([]byte, *tunMTU)
+			for {
+				n, err := tunDev.Read(buf)
+				if err != nil {
+					return
+				}
+				tunMu.Lock()
+				peers := make([]tunPeer, 0, len(tunPeers))
+				for _, p := range tunPeers {
+					peers = append(peers, p)
+				}
+				tunMu.Unlock()
+				for _, p := range peers {
+					enc, err := handshake.SealPayload(p.key, buf[:n])
+					if err != nil {
+						continue
+					}
+					out, err := frame.Encode(enc, *frameSize, frame.TypeReply, p.tag, 0)
+					if err != nil {
+						continue
+					}
+					conn.WriteToUDP(out, p.addr)
+				}
+			}
+		}()
+	}
 	var packets, bytesIn, bytesOut atomic.Uint64
 	var replyPackets, replyIn, replyOut atomic.Uint64
 	var hsPackets atomic.Uint64
@@ -314,6 +361,21 @@ func main() {
 		}
 
 		if nextHop == "dest" {
+			if tunDev != nil {
+				if _, err := tunDev.Write(inner2); err != nil {
+					log.Printf("tun write: %v", err)
+					continue
+				}
+				rk := replyKeys.get(tag)
+				if rk == nil {
+					log.Printf("no reply key for tag %d", tag)
+					continue
+				}
+				tunMu.Lock()
+				tunPeers[tag] = tunPeer{addr: st.Prev, key: rk, tag: tag}
+				tunMu.Unlock()
+				continue
+			}
 			if dest == nil {
 				log.Printf("no -dest configured, dropping payload")
 				continue
