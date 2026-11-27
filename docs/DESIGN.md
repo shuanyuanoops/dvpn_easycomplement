@@ -48,6 +48,18 @@ exit TUN -> 本地服务，或（将来）公网出口
 
 注意：AS 只表示注册时填的归属，不等于可验证的 BGP 归属；controller 也不会自己去查 BGP。
 
+### 分布式选路原型（`internal/assign`）
+
+- 3 个独立 assignment server，每个只选一跳（entry/middle/exit）；
+- bulletin board 拼 ticket、重试重复 ID/AS 冲突；
+- client view 只有 `entry + token`，没有 middle/exit；
+- relay 用 hop token + 自己的 ID 只能查相邻节点；
+- `cmd/assignsim` 跑 100 relay / 1000 client。
+
+**但 board 仍持有完整 ticket**：这是“分布式选择”的第一步，不是完整 TorPath
+（没有 Neff shuffle、没有门限解密）。client 现在只拿到 entry，还不能自己建完整
+洋葱，需要下一步做 telescoping。
+
 ## 3. sessionKey 是什么
 
 `sessionKey` 是客户端为**每一跳**生成的 32 字节对称密钥。

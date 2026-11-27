@@ -11,6 +11,26 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.27.0] - 2026-11-28
+
+### Added
+- `internal/assign`: 3 independent assignment servers, each picking one hop;
+  a bulletin board assembles a ticket, retries duplicate IDs/AS conflicts, and
+  exposes a restricted client view (entry + token) and relay neighbor lookup.
+- `cmd/assignsim`: 100 relays / 1000 clients / 10 AS simulation with path
+  diversity, relay coverage and AS distribution stats.
+- Tests: client view has no middle/exit, relay sees only neighbors, duplicate
+  IDs rejected, AS retries/fallback, 100/1000 scale, `-race`.
+
+### Measured
+- role mode: 1000 circuits, 987 distinct paths, 0 duplicate IDs, 100% AS-distinct.
+- flat mode: 38 duplicate-ID retries, 1000/1000 distinct paths.
+
+### Limits
+- The bulletin board still holds the full ticket; this is a distributed-selection
+  prototype, not full TorPath (no Neff shuffle / threshold decryption).
+- Client only gets entry; telescoping data-plane construction is not wired yet.
+
 ## [0.26.0] - 2026-11-27
 
 ### Added

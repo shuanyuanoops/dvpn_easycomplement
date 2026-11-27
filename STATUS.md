@@ -32,6 +32,7 @@
 | v0.24 | 双客户端 e2e + exit 按内层 IP 分流 | `scripts/run_multi.sh` |
 | v0.25 | exit NAT 出口 + 客户端签用量原语 | `scripts/run_nat.sh`、`internal/usage` |
 | v0.26 | 客户端签用量接入 client/exit | `scripts/run_usage.sh` |
+| v0.27 | 3 个 assignment server + 受限 client/relay 视图模拟 | `internal/assign`、`cmd/assignsim` |
 
 全量：`go test ./...` 通过。
 
