@@ -11,6 +11,24 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.25.0] - 2026-11-27
+
+### Added
+- `scripts/run_nat.sh`: real exit forwarding + MASQUERADE to a fake WAN
+  (203.0.113.1) in user namespaces; HTTP through NAT verified.
+- `internal/usage` + `cmd/settle`: client-signed grant caps the node's claim.
+  Grant=1000/claim=1500 settles at 1000; tampering fails.
+- Tests for overclaim cap, underclaim, tampered claim.
+
+### Measured
+- NAT: client TUN 10.99.0.2 -> exit TUN -> MASQUERADE 203.0.113.254 -> WAN
+  203.0.113.1:8080; WAN log shows NAT source, not 10.99.0.2.
+- Usage: `settled: bytes=1000 packets=10 cost=1000` from a 1500-byte claim.
+
+### Limits
+- Usage signing is a library + CLI demo; not yet emitted by the running client
+  or consumed by the exit/transport.
+
 ## [0.24.0] - 2026-11-27
 
 ### Added
