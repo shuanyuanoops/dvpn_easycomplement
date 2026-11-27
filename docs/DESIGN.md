@@ -57,8 +57,13 @@ exit TUN -> 本地服务，或（将来）公网出口
 - `cmd/assignsim` 跑 100 relay / 1000 client。
 
 **但 board 仍持有完整 ticket**：这是“分布式选择”的第一步，不是完整 TorPath
-（没有 Neff shuffle、没有门限解密）。client 现在只拿到 entry，还不能自己建完整
-洋葱，需要下一步做 telescoping。
+（没有 Neff shuffle、没有门限解密）。
+
+`internal/assign/telescope.go` 做了 telescoping 模拟：client 只拿 entry，逐跳扩展
+得到 3 个会话密钥，但拿不到 middle/exit 的身份；数据能经过 entry/middle/exit
+解到明文。`cmd/tunnelsim` 演示了这条路径。
+
+这仍是单进程模拟，真 UDP transport 还没有接 telescoping。
 
 ## 3. sessionKey 是什么
 

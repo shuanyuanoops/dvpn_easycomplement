@@ -11,6 +11,24 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.28.0] - 2026-11-28
+
+### Added
+- `internal/assign/telescope.go`: simulated telescoping. The client only holds
+  entry + token; each relay extends to its next hop; the client derives one
+  session key per hop but never sees middle/exit identities.
+- `cmd/tunnelsim`: assign a circuit, telescope 3 keys, seal a payload, peel it
+  through entry -> middle -> exit.
+- Tests: 3 keys, data round-trip, client JSON contains entry but not middle/exit.
+
+### Measured
+- `tunnelsim`: `client view: entry=entry-0 token=...`, `learned 3 hop keys`,
+  `data: hello from telescope`.
+
+### Limits
+- This is a simulation in one process; the real UDP transport still uses the
+  old client-built onion. Board still holds the full ticket.
+
 ## [0.27.0] - 2026-11-28
 
 ### Added
