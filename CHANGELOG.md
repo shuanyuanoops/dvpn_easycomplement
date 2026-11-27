@@ -11,6 +11,20 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.21.0] - 2026-11-27
+
+### Added
+- `scripts/run_e2e.sh`: one user-namespace lab combining TUN, TLS 1.3 + ECH,
+  and real-transport link receipts.
+  - client TUN 10.99.0.2 -> TLS/ECH gate -> entry -> middle -> exit TUN 10.99.0.1
+  - HTTP on the exit TUN; `curl` through the tunnel
+  - `linkaudit` checks entry->middle and middle->exit
+
+### Measured
+- TLS 1.3 (`0x304`) with `ech=true`.
+- `linkaudit links=2 ok=2 failed=0 challenges=6 ok_challenges=6`.
+- HTTP GET returns the directory page; exit 0.
+
 ## [0.20.0] - 2026-11-26
 
 ### Added

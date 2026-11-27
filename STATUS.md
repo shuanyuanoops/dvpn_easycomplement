@@ -26,6 +26,7 @@
 | v0.18 | TUN 端到端数据面（client TUN → 洋葱 → exit TUN → HTTP） | `scripts/run_tun_lab.sh` |
 | v0.19 | 真传输逐链路双签 + 挑战 | `cmd/linkaudit`、`run_cluster.sh` |
 | v0.20 | TLS 1.3 + ECH 入口伪装 | `cmd/tlsgate`、`run_tls_ech.sh` |
+| v0.21 | TUN + TLS/ECH + 双签端到端 demo | `scripts/run_e2e.sh` |
 
 全量：`go test ./...` 通过。
 
