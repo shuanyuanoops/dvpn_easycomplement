@@ -11,6 +11,16 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.24.0] - 2026-11-27
+
+### Added
+- `scripts/run_multi.sh`: two client netns, two inner IPs (10.99.0.2/.3),
+  one entry/middle/exit; exit demuxes replies by destination IP.
+- Verified both clients fetch HTTP through the tunnel; linkaudit sees 4 links.
+
+### Measured
+- `linkaudit links=4 ok=4 failed=0 challenges=12 ok_challenges=12`.
+
 ## [0.23.0] - 2026-11-27
 
 ### Added

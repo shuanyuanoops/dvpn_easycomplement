@@ -29,6 +29,7 @@
 | v0.21 | TUN + TLS/ECH + 双签端到端 demo | `scripts/run_e2e.sh` |
 | v0.22 | exit 按内层 IP 分流（多客户端基础） | `cmd/relay`、`run_e2e.sh` |
 | v0.23 | AS 优先的随机选路 | `internal/registry`、`TestAssignPrefersDistinctAS` |
+| v0.24 | 双客户端 e2e + exit 按内层 IP 分流 | `scripts/run_multi.sh` |
 
 全量：`go test ./...` 通过。
 

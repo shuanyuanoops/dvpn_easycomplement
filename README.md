@@ -13,6 +13,7 @@ bash scripts/run_tun_lab.sh     # TUN 端到端：client TUN -> 洋葱 -> exit T
 bash scripts/run_tls.sh         # TLS 1.3 入口网关
 bash scripts/run_tls_ech.sh     # TLS 1.3 + ECH 入口网关
 bash scripts/run_e2e.sh         # TUN + TLS/ECH + 链路双签，一条龙
+bash scripts/run_multi.sh       # 两个客户端、两个内层 IP，exit 按目的 IP 分流
 # 集群脚本还会跑 cmd/linkaudit：逐链路双签 + 随机 challenge
 # TUN 模式（需要 root/TUN 权限）：
 #   client -tun -tun-name dvpn0 ... ; exit relay -tun -tun-name dvpn1 ...
