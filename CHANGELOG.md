@@ -11,6 +11,19 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.23.0] - 2026-11-27
+
+### Added
+- Registry relay has an optional `as` field.
+- `Pool.Assign()` prefers entry/middle/exit with pairwise-distinct AS values;
+  falls back to random distinct IDs when AS data is missing.
+- `run_cluster.sh` relay pool now carries AS65001..AS65006.
+- `docs/DESIGN.md` documents routing, handshake, sessionKey, onion, receipts,
+  and the current AS/chain/metering limits.
+
+### Measured
+- Registry unit tests pass; cluster still 4000/4000 + linkaudit clean.
+
 ## [0.22.0] - 2026-11-27
 
 ### Added

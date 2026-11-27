@@ -44,13 +44,9 @@ exit TUN -> 本地服务，或（将来）公网出口
 
 ### 现在的 AS 问题
 
-注册表目前只有 `id/role/addr/identity`，**没有 AS 字段**。所以“随机”只是从角色池里随机，不考虑 AS 多样性，也不保证三跳属于不同 AS。
+注册表已加 `AS` 字段；`Assign()` 会优先选 AS 两两不同的 entry/middle/exit。池子无法满足时，退化为任意随机组合，但保证 ID 不重复。
 
-下一步应该：
-
-- 注册表加 `AS`（或 operator）；
-- `Assign()` 优先选不同 AS 的 entry/middle/exit；
-- 池子不够时退化为“尽量不同”，并在结果里标注。
+注意：AS 只表示注册时填的归属，不等于可验证的 BGP 归属；controller 也不会自己去查 BGP。
 
 ## 3. sessionKey 是什么
 

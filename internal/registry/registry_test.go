@@ -139,3 +139,19 @@ func TestLoadRejectsInvalid(t *testing.T) {
 		t.Fatal("expected duplicate-id error")
 	}
 }
+
+func TestAssignPrefersDistinctAS(t *testing.T) {
+	p := testPool()
+	for i := range p.Relays {
+		p.Relays[i].AS = "AS" + string(rune('A'+i))
+	}
+	for i := 0; i < 50; i++ {
+		e, m, x, err := p.Assign()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.AS == m.AS || e.AS == x.AS || m.AS == x.AS {
+			t.Fatalf("AS not distinct: %s %s %s", e.AS, m.AS, x.AS)
+		}
+	}
+}

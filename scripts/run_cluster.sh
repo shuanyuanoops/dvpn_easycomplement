@@ -97,12 +97,12 @@ EOF
 cat >"$RELAYS" <<'EOF'
 {
   "relays": [
-    {"id": "entry-0",  "role": "entry",  "addr": "127.0.0.1:17101", "identity": "/tmp/dvpn_entry-0.id"},
-    {"id": "entry-1",  "role": "entry",  "addr": "127.0.0.1:17102", "identity": "/tmp/dvpn_entry-1.id"},
-    {"id": "middle-0", "role": "middle", "addr": "127.0.0.1:17103", "identity": "/tmp/dvpn_middle-0.id"},
-    {"id": "middle-1", "role": "middle", "addr": "127.0.0.1:17104", "identity": "/tmp/dvpn_middle-1.id"},
-    {"id": "exit-0",   "role": "exit",   "addr": "127.0.0.1:17105", "identity": "/tmp/dvpn_exit-0.id"},
-    {"id": "exit-1",   "role": "exit",   "addr": "127.0.0.1:17106", "identity": "/tmp/dvpn_exit-1.id"}
+    {"id": "entry-0",  "role": "entry",  "addr": "127.0.0.1:17101", "identity": "/tmp/dvpn_entry-0.id", "as": "AS65001"},
+    {"id": "entry-1",  "role": "entry",  "addr": "127.0.0.1:17102", "identity": "/tmp/dvpn_entry-1.id", "as": "AS65002"},
+    {"id": "middle-0", "role": "middle", "addr": "127.0.0.1:17103", "identity": "/tmp/dvpn_middle-0.id", "as": "AS65003"},
+    {"id": "middle-1", "role": "middle", "addr": "127.0.0.1:17104", "identity": "/tmp/dvpn_middle-1.id", "as": "AS65004"},
+    {"id": "exit-0",   "role": "exit",   "addr": "127.0.0.1:17105", "identity": "/tmp/dvpn_exit-0.id", "as": "AS65005"},
+    {"id": "exit-1",   "role": "exit",   "addr": "127.0.0.1:17106", "identity": "/tmp/dvpn_exit-1.id", "as": "AS65006"}
   ]
 }
 EOF

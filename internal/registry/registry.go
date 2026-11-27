@@ -18,6 +18,7 @@ type Relay struct {
 	Role     string `json:"role"`
 	Addr     string `json:"addr"`
 	Identity string `json:"identity"`
+	AS       string `json:"as,omitempty"`
 }
 
 // Pool is the set of relays available for assignment.
@@ -92,27 +93,56 @@ func (p *Pool) Validate() error {
 	return nil
 }
 
-// Assign picks one entry, one middle and one exit at random. The returned
-// relays always have the requested roles and pairwise-distinct IDs.
+type combo struct {
+	entry, middle, exit Relay
+}
+
+func asDistinct(c combo) bool {
+	if c.entry.AS == "" || c.middle.AS == "" || c.exit.AS == "" {
+		return false
+	}
+	return c.entry.AS != c.middle.AS && c.entry.AS != c.exit.AS && c.middle.AS != c.exit.AS
+}
+
+// Assign picks one entry, one middle and one exit at random. It prefers
+// combinations whose AS values are all present and pairwise distinct; if the
+// pool cannot provide that, it falls back to any random combination with
+// distinct IDs.
 func (p *Pool) Assign() (entry, middle, exit Relay, err error) {
 	if err := p.Validate(); err != nil {
 		return Relay{}, Relay{}, Relay{}, err
 	}
-	roles := []model.Role{model.RoleEntry, model.RoleMiddle, model.RoleExit}
-	picked := make([]Relay, len(roles))
-	for i, role := range roles {
-		cands := p.byRole(role)
-		if len(cands) == 0 {
-			return Relay{}, Relay{}, Relay{}, fmt.Errorf("no %s relay in pool", role)
+	entries := p.byRole(model.RoleEntry)
+	middles := p.byRole(model.RoleMiddle)
+	exits := p.byRole(model.RoleExit)
+	if len(entries) == 0 || len(middles) == 0 || len(exits) == 0 {
+		return Relay{}, Relay{}, Relay{}, errors.New("pool missing a role")
+	}
+
+	var all, distinct []combo
+	for _, e := range entries {
+		for _, m := range middles {
+			for _, x := range exits {
+				if e.ID == m.ID || e.ID == x.ID || m.ID == x.ID {
+					continue
+				}
+				c := combo{e, m, x}
+				all = append(all, c)
+				if asDistinct(c) {
+					distinct = append(distinct, c)
+				}
+			}
 		}
-		picked[i] = cands[rand.IntN(len(cands))]
 	}
-	if picked[0].ID == picked[1].ID || picked[0].ID == picked[2].ID || picked[1].ID == picked[2].ID {
-		// Validate already rejects duplicate IDs; keep the guard in case a
-		// caller builds a Pool without validating.
-		return Relay{}, Relay{}, Relay{}, errors.New("assigned duplicate relay id")
+	pool := all
+	if len(distinct) > 0 {
+		pool = distinct
 	}
-	return picked[0], picked[1], picked[2], nil
+	if len(pool) == 0 {
+		return Relay{}, Relay{}, Relay{}, errors.New("no valid entry/middle/exit combination")
+	}
+	c := pool[rand.IntN(len(pool))]
+	return c.entry, c.middle, c.exit, nil
 }
 
 func (p *Pool) byRole(role model.Role) []Relay {
