@@ -326,9 +326,11 @@ func main() {
 		addr *net.UDPAddr
 		key  []byte
 		tag  uint64
+		ip   net.IP
 	}
 	var tunMu sync.Mutex
 	tunPeers := map[uint64]tunPeer{}
+	clientIPs := map[uint64]net.IP{}
 	if *tunMode && isExit {
 		tunDev, err = tun.Open(*tunName)
 		if err != nil {
@@ -347,23 +349,32 @@ func main() {
 					log.Printf("tun read: %v", err)
 					return
 				}
+				dst := ipv4Dst(buf[:n])
+				if dst == nil {
+					continue
+				}
 				tunMu.Lock()
-				peers := make([]tunPeer, 0, len(tunPeers))
+				var peer *tunPeer
 				for _, p := range tunPeers {
-					peers = append(peers, p)
+					if p.ip != nil && p.ip.Equal(dst) {
+						cp := p
+						peer = &cp
+						break
+					}
 				}
 				tunMu.Unlock()
-				for _, p := range peers {
-					enc, err := handshake.SealPayload(p.key, buf[:n])
-					if err != nil {
-						continue
-					}
-					out, err := frame.Encode(enc, *frameSize, frame.TypeReply, p.tag, 0)
-					if err != nil {
-						continue
-					}
-					conn.WriteToUDP(out, p.addr)
+				if peer == nil {
+					continue
 				}
+				enc, err := handshake.SealPayload(peer.key, buf[:n])
+				if err != nil {
+					continue
+				}
+				out, err := frame.Encode(enc, *frameSize, frame.TypeReply, peer.tag, 0)
+				if err != nil {
+					continue
+				}
+				conn.WriteToUDP(out, peer.addr)
 			}
 		}()
 	}
@@ -419,13 +430,16 @@ func main() {
 			}
 			st := state.Forward(tag, remote, isExit)
 			if isExit {
-				if len(key) != 72 {
+				if len(key) != 76 {
 					log.Printf("exit handshake key len=%d", len(key))
 					continue
 				}
 				keys.set(tag, key[:32])
 				replyKeys.set(tag, key[32:64])
 				hsNonces.set(tag, key[64:72])
+				tunMu.Lock()
+				clientIPs[tag] = net.IPv4(key[72], key[73], key[74], key[75])
+				tunMu.Unlock()
 				ack, err := handshake.SealPayload(key[32:64], key[64:72])
 				if err != nil {
 					log.Printf("ack seal: %v", err)
@@ -519,7 +533,7 @@ func main() {
 					continue
 				}
 				tunMu.Lock()
-				tunPeers[tag] = tunPeer{addr: st.Prev, key: rk, tag: tag}
+				tunPeers[tag] = tunPeer{addr: st.Prev, key: rk, tag: tag, ip: clientIPs[tag]}
 				tunMu.Unlock()
 				continue
 			}
@@ -622,6 +636,13 @@ func loadRoutes(path string) (map[string]*net.UDPAddr, error) {
 		out[node] = a
 	}
 	return out, nil
+}
+
+func ipv4Dst(pkt []byte) net.IP {
+	if len(pkt) < 20 || pkt[0]>>4 != 4 {
+		return nil
+	}
+	return net.IP(pkt[16:20])
 }
 
 // splitHopKey decodes the sealed handshake message of a non-exit relay.

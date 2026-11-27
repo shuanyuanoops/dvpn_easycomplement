@@ -11,6 +11,18 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.22.0] - 2026-11-27
+
+### Added
+- Exit handshake carries the client's inner IPv4 address.
+- Exit TUN now picks the peer by destination IP instead of broadcasting every
+  return packet to all circuits.
+- Single-client e2e regression still passes.
+
+### Limits
+- Two-client e2e is not scripted yet; the demux path is implemented but only
+  single-client lab was run.
+
 ## [0.21.0] - 2026-11-27
 
 ### Added

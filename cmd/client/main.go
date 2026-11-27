@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -90,6 +91,13 @@ func main() {
 	tlsInsecure := flag.Bool("tls-insecure", true, "skip TLS certificate verification (demo)")
 	echConfigPath := flag.String("ech-config", "", "ECHConfigList file for TLS ECH")
 	flag.Parse()
+
+	var clientIP4 [4]byte
+	if p, err := netip.ParsePrefix(*tunIP); err == nil && p.Addr().Is4() {
+		clientIP4 = p.Addr().As4()
+	} else {
+		log.Fatalf("bad -tun-ip %q", *tunIP)
+	}
 
 	ids := strings.Split(*pathStr, ",")
 	entryAddr := *entry
@@ -178,10 +186,11 @@ func main() {
 			}
 			var msg []byte
 			if i == len(pubHex)-1 {
-				msg = make([]byte, 0, 3*len(sessionKey))
+				msg = make([]byte, 0, 3*len(sessionKey)+4)
 				msg = append(msg, sessionKey...)
 				msg = append(msg, replyKey...)
 				msg = append(msg, hsNonce...)
+				msg = append(msg, clientIP4[:]...)
 			} else {
 				// Bind the next hop into the sealed handshake so each relay can
 				// look the address up in routes.json instead of a static
