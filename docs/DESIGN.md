@@ -130,10 +130,22 @@ receiver: link-half-v1|tag|from|to|receiver|packets|bytes
 
 **问题**：两个总数无法区分“丢包”和“多报”。现在 `linkaudit` 是精确比对，有丢包就失败；仿真里有 3σ 容忍，但真传输没有。
 
-### 将来的方向
+### 客户端签用量（已接入）
 
-- 客户端签“本次用量”，节点不能超过客户端签的量收费；
-- 或者逐包/逐批 ACK，sender 只能对 receiver 签过的包收费；
+- 客户端每 200 ms 写一份签名 grant：`session=内层IP`、`node=exit id`、
+  `bytes/packets`、epoch；
+- exit 在 SIGTERM 时按客户端内层 IP 写签名 claim；
+- `cmd/settle` 验双方签名，`paid = min(claim, grant)`，所以节点不能超过
+  客户端签的量多收；
+- `scripts/run_usage.sh` 实测 `grant=398 claim=398 paid=398`；
+- `cmd/settle` demo 用 grant=1000、claim=1500 证明封顶到 1000。
+
+局限：客户端 200 ms 才写一次，进程被 SIGKILL 时最后一次可能没写；exit 只在
+SIGTERM 时写 claim；多客户端的 usage 还没单独跑。
+
+### 将来
+
+- 逐包/逐批 ACK，让“丢包 vs 多报”可裁决；
 - 邻居双签只做审计，不作为唯一付款依据。
 
 ## 8. 链

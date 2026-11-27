@@ -15,6 +15,7 @@ bash scripts/run_tls_ech.sh     # TLS 1.3 + ECH 入口网关
 bash scripts/run_e2e.sh         # TUN + TLS/ECH + 链路双签，一条龙
 bash scripts/run_multi.sh       # 两个客户端、两个内层 IP，exit 按目的 IP 分流
 bash scripts/run_nat.sh         # exit 转发 + MASQUERADE 到假公网
+bash scripts/run_usage.sh       # TUN + TLS/ECH + 双签 + 客户端签用量结算
 go run ./cmd/settle             # 客户端签 grant -> 节点 claim 封顶 demo
 # 集群脚本还会跑 cmd/linkaudit：逐链路双签 + 随机 challenge
 # TUN 模式（需要 root/TUN 权限）：

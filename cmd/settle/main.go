@@ -31,7 +31,7 @@ func main() {
 		return
 	}
 	var g usage.Grant
-	var c usage.Claim
+	var claims []usage.Claim
 	gb, err := os.ReadFile(*grantPath)
 	if err != nil {
 		log.Fatal(err)
@@ -43,10 +43,24 @@ func main() {
 	if err := json.Unmarshal(gb, &g); err != nil {
 		log.Fatal(err)
 	}
-	if err := json.Unmarshal(cb, &c); err != nil {
-		log.Fatal(err)
+	if err := json.Unmarshal(cb, &claims); err != nil || len(claims) == 0 {
+		var one usage.Claim
+		if err := json.Unmarshal(cb, &one); err != nil {
+			log.Fatal(err)
+		}
+		claims = []usage.Claim{one}
 	}
-	paid, pkts, cost, err := usage.Settle(g, c, *price)
+	var c *usage.Claim
+	for i := range claims {
+		if claims[i].Session == g.Session && claims[i].Node == g.Node && claims[i].Epoch == g.Epoch {
+			c = &claims[i]
+			break
+		}
+	}
+	if c == nil {
+		log.Fatal("no claim matches the grant")
+	}
+	paid, pkts, cost, err := usage.Settle(g, *c, *price)
 	if err != nil {
 		log.Fatal(err)
 	}

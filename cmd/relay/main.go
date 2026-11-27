@@ -29,6 +29,7 @@ import (
 	"dvpn-sim/internal/onion"
 	"dvpn-sim/internal/receipt"
 	"dvpn-sim/internal/tun"
+	"dvpn-sim/internal/usage"
 )
 
 // hopFieldSize is the width of a node id in an onion next-hop field and in the
@@ -216,6 +217,8 @@ func main() {
 	tunMTU := flag.Int("tun-mtu", 800, "exit TUN MTU (must fit the onion payload)")
 	tunIP := flag.String("tun-ip", "10.99.0.1/24", "exit TUN address (CIDR)")
 	controlAddr := flag.String("control-addr", "", "HTTP control address for link receipts/challenges (e.g. 127.0.0.1:17201)")
+	claimOut := flag.String("claim-out", "", "exit: write signed usage claims here on SIGTERM")
+	claimEpoch := flag.Int64("claim-epoch", 1, "exit: usage epoch")
 	flag.Parse()
 
 	if *id == "" {
@@ -331,6 +334,11 @@ func main() {
 	var tunMu sync.Mutex
 	tunPeers := map[uint64]tunPeer{}
 	clientIPs := map[uint64]net.IP{}
+	type usageStat struct {
+		bytes   int64
+		packets int64
+	}
+	tunStats := map[string]usageStat{}
 	if *tunMode && isExit {
 		tunDev, err = tun.Open(*tunName)
 		if err != nil {
@@ -386,6 +394,24 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-stop
+		if *claimOut != "" {
+			tunMu.Lock()
+			var claims []usage.Claim
+			for sess, us := range tunStats {
+				c := usage.Claim{
+					Session: sess, Node: *id, Epoch: *claimEpoch,
+					Bytes: us.bytes, Packets: us.packets, Pub: identityPub,
+				}
+				usage.SignClaim(&c, identityPriv)
+				claims = append(claims, c)
+			}
+			tunMu.Unlock()
+			if b, err := json.Marshal(claims); err == nil {
+				if err := os.WriteFile(*claimOut, b, 0o600); err != nil {
+					log.Printf("claim write: %v", err)
+				}
+			}
+		}
 		if *receiptPath != "" {
 			r := receipt.New(*name, *role, *runID, start, time.Now(),
 				int64(packets.Load()), int64(bytesIn.Load()), int64(bytesOut.Load()), receiptPriv)
@@ -523,9 +549,21 @@ func main() {
 
 		if nextHop == "dest" {
 			if tunDev != nil {
-				if _, err := tunDev.Write(inner2); err != nil {
+				pkt := inner2
+				if n := ipLen(pkt); n > 0 {
+					pkt = pkt[:n]
+				}
+				if _, err := tunDev.Write(pkt); err != nil {
 					log.Printf("tun write: %v", err)
 					continue
+				}
+				if cip := clientIPs[tag]; cip != nil {
+					tunMu.Lock()
+					us := tunStats[cip.String()]
+					us.bytes += int64(len(pkt))
+					us.packets++
+					tunStats[cip.String()] = us
+					tunMu.Unlock()
 				}
 				rk := replyKeys.get(tag)
 				if rk == nil {
@@ -636,6 +674,28 @@ func loadRoutes(path string) (map[string]*net.UDPAddr, error) {
 		out[node] = a
 	}
 	return out, nil
+}
+
+func ipLen(pkt []byte) int {
+	if len(pkt) < 20 {
+		return 0
+	}
+	switch pkt[0] >> 4 {
+	case 4:
+		n := int(binary.BigEndian.Uint16(pkt[2:4]))
+		if n >= 20 && n <= len(pkt) {
+			return n
+		}
+	case 6:
+		if len(pkt) < 40 {
+			return 0
+		}
+		n := 40 + int(binary.BigEndian.Uint16(pkt[4:6]))
+		if n <= len(pkt) {
+			return n
+		}
+	}
+	return 0
 }
 
 func ipv4Dst(pkt []byte) net.IP {

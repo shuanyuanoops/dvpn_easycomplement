@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"dvpn-sim/internal/registry"
 	"dvpn-sim/internal/transport"
 	"dvpn-sim/internal/tun"
+	"dvpn-sim/internal/usage"
 )
 
 // hopFieldSize is the width of a node id in an onion next-hop field.
@@ -90,6 +92,8 @@ func main() {
 	tlsName := flag.String("tls-name", "dvpn.local", "TLS server name")
 	tlsInsecure := flag.Bool("tls-insecure", true, "skip TLS certificate verification (demo)")
 	echConfigPath := flag.String("ech-config", "", "ECHConfigList file for TLS ECH")
+	usageOut := flag.String("usage-out", "", "write periodic client-signed usage grants here")
+	usageEpoch := flag.Int64("usage-epoch", 1, "usage epoch")
 	flag.Parse()
 
 	var clientIP4 [4]byte
@@ -357,6 +361,44 @@ func main() {
 	start := time.Now()
 	sent := 0
 	var wireBytes int64
+
+	var usagePub ed25519.PublicKey
+	var usagePriv ed25519.PrivateKey
+	var usageBytes, usagePackets atomic.Int64
+	clientID := netip.AddrFrom4(clientIP4).String()
+	writeGrant := func() {
+		if *usageOut == "" {
+			return
+		}
+		g := usage.Grant{
+			Session: clientID,
+			Client:  *name,
+			Node:    string(path[2]),
+			Epoch:   *usageEpoch,
+			Bytes:   usageBytes.Load(),
+			Packets: usagePackets.Load(),
+			Pub:     usagePub,
+		}
+		usage.SignGrant(&g, usagePriv)
+		b, err := json.Marshal(g)
+		if err != nil {
+			return
+		}
+		tmp := *usageOut + ".tmp"
+		if err := os.WriteFile(tmp, b, 0o600); err == nil {
+			_ = os.Rename(tmp, *usageOut)
+		}
+	}
+	if *usageOut != "" {
+		usagePub, usagePriv, _ = ed25519.GenerateKey(rand.Reader)
+		go func() {
+			t := time.NewTicker(200 * time.Millisecond)
+			defer t.Stop()
+			for range t.C {
+				writeGrant()
+			}
+		}()
+	}
 	if *tunMode {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -395,6 +437,8 @@ func main() {
 			}
 			wireBytes += int64(len(out))
 			sent++
+			usageBytes.Add(int64(n))
+			usagePackets.Add(1)
 		}
 	} else {
 		for sent < *n {
@@ -421,6 +465,11 @@ func main() {
 		}
 	}
 
+	if *usageOut != "" && !*tunMode {
+		usageBytes.Store(int64(sent) * int64(payloadSize))
+		usagePackets.Store(int64(sent))
+		writeGrant()
+	}
 	time.Sleep(300 * time.Millisecond)
 	elapsed := time.Since(start)
 

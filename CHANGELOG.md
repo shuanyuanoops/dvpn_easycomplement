@@ -11,6 +11,20 @@ All important changes to `dvpn-sim` are recorded here.
 - Padding / batching experiment.
 - Stake ledger and settlement (currently only slash counters).
 
+## [0.26.0] - 2026-11-27
+
+### Added
+- Client writes periodic signed usage grants (`-usage-out`, 200 ms ticker) over TUN.
+- Exit writes signed usage claims on SIGTERM (`-claim-out`), keyed by client
+  inner IP.
+- `cmd/settle` accepts grant + claim files and caps payment at the grant.
+- `scripts/run_usage.sh`: TUN + TLS/ECH + linkaudit + usage settlement.
+
+### Measured
+- `grant_bytes=398 claim_bytes=398 paid_bytes=398 paid_packets=6 cost=398`.
+- `cmd/settle` demo: grant 1000 / claim 1500 -> paid 1000.
+- Fixed exit TUN writing padded onion payload instead of the real IP length.
+
 ## [0.25.0] - 2026-11-27
 
 ### Added
